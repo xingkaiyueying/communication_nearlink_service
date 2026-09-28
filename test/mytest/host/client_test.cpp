@@ -2,18 +2,20 @@
 #include <cstring>
 #include "iposl_codec.c"
 #include "iposl_client.c"
-static int failures, configured, prepared, rollbacks, supported;
+static int failures, configured, prepared, rollbacks, supported, capabilityUpdates;
 static bool secure = true, reserveFails = false;
 static uint8_t lastMode;
 static void Configured(const uint8_t *, bool, int32_t e, uint8_t m, uint64_t g)
 { assert(g == 42); if (e) ++failures; else ++configured; lastMode = m; }
 static void Supported(const uint8_t *, bool s, int32_t, uint8_t m, bool k, uint64_t g)
 { assert(g == 42 && s && k && m == 3); ++supported; }
+static void PeerCapabilities(const uint8_t *, uint8_t modes, uint64_t g)
+{ assert(g == 42); assert(modes == 0 || modes == 1 || modes == 3); ++capabilityUpdates; }
 static int Prepare(const uint8_t *, uint8_t m, uint64_t)
 { if (m == 0) ++rollbacks; else ++prepared; return reserveFails ? -1 : 0; }
 static bool Secure(const uint8_t *, uint64_t) { return secure; }
 const IposlProfileCallbacks *IposlGetCallbacks()
-{ static IposlProfileCallbacks cb = {Supported,Configured,Prepare,Secure,nullptr}; return &cb; }
+{ static IposlProfileCallbacks cb = {Supported,Configured,Prepare,Secure,nullptr,PeerCapabilities}; return &cb; }
 static void Discover(uint8_t mode = 3, bool terminal = true)
 {
     IposlClientStop(); secure = true; reserveFails = false;
@@ -43,7 +45,7 @@ static void Response(uint8_t opcode, uint8_t result, int transport = 0, uint8_t 
 int main()
 {
     assert(IposlCodecVerifyGoldenVectors());
-    Discover(); Capability(3); assert(methodCalls == 1 && g_selectedMode == 3 && prepared == 1);
+    Discover(); Capability(3); assert(methodCalls == 1 && g_selectedMode == 3 && prepared == 1 && capabilityUpdates == 1);
     Response(1,0); assert(methodCalls == 2 && g_expectedOpcode == 2);
     Response(2,0); assert(configured == 2 && lastMode == 3);
     Response(2,0); assert(configured == 2); // duplicate enable response is consumed once
@@ -60,7 +62,8 @@ int main()
     Discover(); Capability(3); Response(1,0); before = methodCalls;
     Response(2,255); assert(methodCalls == before && failures == 5); // never fallback after enable
     Discover(1); Capability(3); assert(g_selectedMode == 1);
-    Discover(3,false); before = methodCalls; Capability(3); assert(supported == 1 && methodCalls == before);
+    Discover(3,false); before = methodCalls; int updates = capabilityUpdates;
+    Capability(3); assert(supported == 1 && methodCalls == before && capabilityUpdates == updates);
     Discover(); before = methodCalls; Capability(2); assert(methodCalls == before && failures == 6);
     Discover(); reserveFails = true; before = methodCalls; Capability(3); assert(methodCalls == before && failures == 7);
     uint8_t modes = 99, alternate[] = {42,0,9,4,3,3,7,2,6,64,1,2};

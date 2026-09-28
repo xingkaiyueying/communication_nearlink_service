@@ -50,8 +50,10 @@ public:
 private:
     NearlinkIpShareService() = default;
     static void OnPeerSupported(const uint8_t peer[6], bool supported, int32_t error, uint8_t peerModes, bool known, uint64_t generation);
+    static void OnPeerCapabilities(const uint8_t peer[6], uint8_t peerModes, uint64_t generation);
     static void OnConfigured(const uint8_t peer[6], bool opened, int32_t error, uint8_t mode, uint64_t generation);
     void HandlePeerSupported(const uint8_t peer[6], bool supported, int32_t error, uint8_t peerModes, bool known, uint64_t generation);
+    void HandlePeerCapabilities(const uint8_t peer[6], uint8_t peerModes, uint64_t generation);
     void HandleConfigured(const uint8_t peer[6], bool opened, int32_t error, uint8_t mode, uint64_t generation);
     void HandleChannelState(bool established, int32_t error);
     int32_t ValidateSecurePeer(const std::string &peerAddress, uint8_t peer[6], uint8_t &addressType) const;

@@ -58,6 +58,7 @@ int32_t NearlinkIpShareService::Initialize()
         .prepareMode = &NearlinkIpShareService::PrepareMode,
         .isSecure = &NearlinkIpShareService::IsSecure,
         .canSend = &NearlinkIpShareService::CanSend,
+        .onPeerCapabilities = &NearlinkIpShareService::OnPeerCapabilities,
     };
     int32_t profileRet = IposlProfileInit(&callbacks);
     if (profileRet != IPOSL_SUCCESS) {
@@ -481,6 +482,32 @@ void NearlinkIpShareService::HandlePeerSupported(const uint8_t peer[6], bool sup
     NotifyStatus(status, observer);
     HILOGI("[IpShare][Service] support callback handled supported=%{public}d error=%{public}d", reportedSupported,
            error);
+}
+
+void NearlinkIpShareService::OnPeerCapabilities(const uint8_t peer[6], uint8_t peerModes, uint64_t generation)
+{
+    if (peer == nullptr) return;
+    auto peerCopy = std::array<uint8_t, 6>{};
+    (void)memcpy(peerCopy.data(), peer, peerCopy.size());
+    DoInIpShareThread([peerCopy, peerModes, generation]() {
+        GetInstance().HandlePeerCapabilities(peerCopy.data(), peerModes, generation); });
+}
+
+void NearlinkIpShareService::HandlePeerCapabilities(const uint8_t peer[6], uint8_t peerModes, uint64_t generation)
+{
+    if (peerModes != 0 && peerModes != 1 && peerModes != 3) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (generation != status_.generation || status_.role != NearlinkIpShareRole::TERMINAL ||
+        status_.state == NearlinkIpShareState::IDLE || status_.state == NearlinkIpShareState::STOPPING ||
+        status_.state == NearlinkIpShareState::ERROR || memcmp(peer_, peer, sizeof(peer_)) != 0) return;
+    capabilities_.identifierPresent = true;
+    capabilities_.discoveryState = 1;
+    capabilities_.peerCapabilityKnown = true;
+    capabilities_.peerModes.clear();
+    if (peerModes & 1) capabilities_.peerModes.push_back(1);
+    if (peerModes == 3) capabilities_.peerModes.push_back(3);
+    peerSupported_ = true;
+    (void)memcpy(supportedPeer_, peer, sizeof(supportedPeer_));
 }
 
 void NearlinkIpShareService::OnConfigured(const uint8_t peer[6], bool opened, int32_t error, uint8_t mode, uint64_t generation)

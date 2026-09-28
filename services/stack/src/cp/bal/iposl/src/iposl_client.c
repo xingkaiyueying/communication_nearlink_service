@@ -194,12 +194,15 @@ static void OnReadCapability(int32_t appId, NLSTK_SsapClientReadPropertyInfo_S *
     g_capabilityKnown = ret == NLSTK_ERRCODE_SUCCESS && property != NULL &&
         property->handle == g_capabilityHandle && property->errorCode == NLSTK_ERRCODE_SUCCESS &&
         IposlCodecGatewayModes(property->value.data, property->value.len, &g_peerModes);
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    if (g_terminal && g_capabilityKnown && callbacks != NULL && callbacks->onPeerCapabilities != NULL) {
+        callbacks->onPeerCapabilities(g_peer, g_peerModes, g_generation);
+    }
     if (!g_terminal) {
         NotifySupported(g_identifierFound, IPOSL_SUCCESS);
         Finish(false);
         return;
     }
-    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
     g_selectedMode = g_capabilityKnown ? IposlCodecSelectMode(g_requestedMode, g_peerModes) : 0;
     if (g_selectedMode == 0 || callbacks == NULL ||
         callbacks->prepareMode(g_peer, g_selectedMode, g_generation) != 0 ||

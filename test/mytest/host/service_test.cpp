@@ -58,6 +58,11 @@ int main()
     assert(s.StartNearlinkTerminalWithMode(address,3)==0 && s.StartTerminal(address)!=0);
     DrainTasks(); assert(starts==1);
     uint64_t first=profileGeneration;
+    bool supported=false; NearlinkIpShareCapabilities capabilities;
+    assert(s.QueryNearlinkIpShareCapabilities(address,capabilities)==0 && !capabilities.peerCapabilityKnown);
+    profileCallbacks.onPeerCapabilities(peer,3,first); DrainTasks();
+    assert(s.QueryNearlinkIpShareCapabilities(address,capabilities)==0);
+    assert(capabilities.peerCapabilityKnown && capabilities.peerModes==std::vector<int32_t>({1,3}));
     assert(profileCallbacks.prepareMode(peer,3,first)==0);
     profileCallbacks.onConfigured(peer,false,0,3,first); DrainTasks();
     profileCallbacks.onConfigured(peer,true,0,3,first); DrainTasks();
@@ -66,11 +71,10 @@ int main()
     c.HandleChannelStatus(&rsp); DrainTasks();
     NearlinkIpShareStatus status; s.GetStatus(status);
     assert(status.state==NearlinkIpShareState::CHANNEL_READY && status.selectedMode==NearlinkIpShareMode::DUAL_STACK);
-    bool supported=false; NearlinkIpShareCapabilities capabilities;
     assert(s.IsPeerSupported(address,supported)==0 && supported);
     assert(s.QueryNearlinkIpShareCapabilities(address,capabilities)==0);
     assert(capabilities.identifierPresent && capabilities.discoveryState==1);
-    assert(!capabilities.peerCapabilityKnown && capabilities.peerModes.empty());
+    assert(capabilities.peerCapabilityKnown && capabilities.peerModes==std::vector<int32_t>({1,3}));
     NearlinkIpShareStatus afterQuery; s.GetStatus(afterQuery);
     assert(afterQuery.generation==status.generation && afterQuery.sequence==status.sequence);
     assert(s.Stop()==0); DrainTasks(); s.GetStatus(status);
@@ -79,6 +83,8 @@ int main()
     assert(status.state==NearlinkIpShareState::IDLE);
     assert(s.StartNearlinkGatewayWithMode(address,3)==0); DrainTasks();
     uint64_t next=profileGeneration; assert(next>first);
+    profileCallbacks.onPeerCapabilities(peer,3,first); DrainTasks();
+    assert(!s.capabilities_.peerCapabilityKnown);
     profileCallbacks.onConfigured(peer,true,0,3,first); DrainTasks(); s.GetStatus(status);
     assert(status.state==NearlinkIpShareState::IFACE_READY && !c.enabled_);
     assert(profileCallbacks.prepareMode(peer,3,first)!=0);
@@ -88,6 +94,7 @@ int main()
     supported=false;
     assert(s.IsPeerSupported(address,supported)==0 && supported);
     assert(s.QueryNearlinkIpShareCapabilities(address,capabilities)==0 && capabilities.identifierPresent);
+    assert(!capabilities.peerCapabilityKnown && capabilities.peerModes.empty());
     rsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED; c.HandleChannelStatus(&rsp); DrainTasks();
     rsp.status=QOSM_TRANS_CHANNEL_RELEASED; c.HandleChannelStatus(&rsp); DrainTasks(); s.GetStatus(status);
     assert(status.generation>next && status.serviceReady && status.selectedMode==NearlinkIpShareMode::NONE);

@@ -66,6 +66,13 @@ int main()
     c.HandleChannelStatus(&rsp); DrainTasks();
     NearlinkIpShareStatus status; s.GetStatus(status);
     assert(status.state==NearlinkIpShareState::CHANNEL_READY && status.selectedMode==NearlinkIpShareMode::DUAL_STACK);
+    bool supported=false; NearlinkIpShareCapabilities capabilities;
+    assert(s.IsPeerSupported(address,supported)==0 && supported);
+    assert(s.QueryNearlinkIpShareCapabilities(address,capabilities)==0);
+    assert(capabilities.identifierPresent && capabilities.discoveryState==1);
+    assert(!capabilities.peerCapabilityKnown && capabilities.peerModes.empty());
+    NearlinkIpShareStatus afterQuery; s.GetStatus(afterQuery);
+    assert(afterQuery.generation==status.generation && afterQuery.sequence==status.sequence);
     assert(s.Stop()==0); DrainTasks(); s.GetStatus(status);
     assert(status.state==NearlinkIpShareState::STOPPING && !registered[1] && !registered[2]);
     rsp.status=QOSM_TRANS_CHANNEL_RELEASED; c.HandleChannelStatus(&rsp); DrainTasks(); s.GetStatus(status);
@@ -78,6 +85,9 @@ int main()
     assert(profileCallbacks.prepareMode(peer,3,next)==0);
     profileCallbacks.onConfigured(peer,false,0,3,next); profileCallbacks.onConfigured(peer,true,0,3,next); DrainTasks();
     assert(c.IsAcceptingPort(c.IP_SHARE_PORT));
+    supported=false;
+    assert(s.IsPeerSupported(address,supported)==0 && supported);
+    assert(s.QueryNearlinkIpShareCapabilities(address,capabilities)==0 && capabilities.identifierPresent);
     rsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED; c.HandleChannelStatus(&rsp); DrainTasks();
     rsp.status=QOSM_TRANS_CHANNEL_RELEASED; c.HandleChannelStatus(&rsp); DrainTasks(); s.GetStatus(status);
     assert(status.generation>next && status.serviceReady && status.selectedMode==NearlinkIpShareMode::NONE);

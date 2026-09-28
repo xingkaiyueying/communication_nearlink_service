@@ -154,6 +154,15 @@ int32_t NearlinkIpShareService::IsPeerSupported(const std::string &peerAddress, 
         return ret;
     }
     std::unique_lock<std::mutex> lock(mutex_);
+    if (initialized_ && status_.role != NearlinkIpShareRole::NONE &&
+        status_.state != NearlinkIpShareState::IDLE && !probeInProgress_ &&
+        memcmp(peer_, peer, sizeof(peer_)) == 0) {
+        // Discovery uses the same IPoSL client as an active session. Reuse only
+        // evidence for this peer instead of interrupting the running role.
+        supported = (peerSupported_ && memcmp(supportedPeer_, peer, sizeof(peer_)) == 0) ||
+            IsIpShareMode(static_cast<int32_t>(status_.selectedMode));
+        return IP_SHARE_OK;
+    }
     if (!initialized_ || status_.role != NearlinkIpShareRole::NONE ||
         (status_.state != NearlinkIpShareState::IDLE && !probeInProgress_)) {
         HILOGE("[IpShare][Service] support probe rejected initialized=%{public}d role=%{public}d state=%{public}d",
@@ -680,6 +689,12 @@ int32_t NearlinkIpShareService::QueryNearlinkIpShareCapabilities(const std::stri
     std::lock_guard<std::mutex> lock(mutex_);
     if (status_.peerAddress != peerAddress || probeInProgress_) return IP_SHARE_INVALID_STATE;
     capabilities = capabilities_;
+    if (supported) {
+        capabilities.identifierPresent = true;
+        capabilities.discoveryState = 1;
+    }
+    // A selected mode proves this session works, but does not reveal every
+    // mode advertised by the peer. Preserve peerCapabilityKnown as discovered.
     return 0;
 }
 

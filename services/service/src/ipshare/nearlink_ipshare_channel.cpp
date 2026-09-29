@@ -260,10 +260,10 @@ int32_t NearlinkIpShareChannel::UpdateValidatedAddress(const NearlinkIpShareAddr
             ++conflicts;
         }
     }
-    HILOGI("[IpShare][IPv6] local evidence address=%{public}s sequence=%{public}llu flags=%{public}u "
+    HILOGI("[IpShare][IPv6] local evidence sequence=%{public}llu flags=%{public}u "
            "preferred=%{public}u valid=%{public}u records=%{public}zu confirmed=%{public}zu "
            "terminalConfirmed=%{public}zu gatewayConfirmed=%{public}zu conflicts=%{public}zu",
-           address.address.c_str(), static_cast<unsigned long long>(address.sequence), address.flags,
+           static_cast<unsigned long long>(address.sequence), address.flags,
            address.preferredLifetime, address.validLifetime, ipv6_.Mappings().size(), confirmed, terminalConfirmed,
            confirmed - terminalConfirmed, conflicts);
     return 0;

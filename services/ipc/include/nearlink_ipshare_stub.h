@@ -37,6 +37,8 @@ private:
     using HandlerWithPermission = std::pair<Handler, std::shared_ptr<NearLinkPermissionItem>>;
 
     static int32_t IsPeerSupportedInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
+    static int32_t StartGatewayAnyInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
+    static int32_t GetSupportedMaxTerminalsInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
     static int32_t StartGatewayInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
     static int32_t StartTerminalInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
     static int32_t StopInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);

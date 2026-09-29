@@ -24,6 +24,8 @@ public:
     int32_t UpdateValidatedAddress(const NearlinkIpShareAddressEvidence &address) override;
     int32_t IsPeerSupported(const std::string &peerAddress, bool &supported) override;
     int32_t StartGateway(const std::string &peerAddress) override;
+    int32_t StartGatewayAny(int32_t mode, int32_t maxTerminals) override;
+    int32_t GetSupportedMaxTerminals() override;
     int32_t StartTerminal(const std::string &gatewayAddress) override;
     int32_t Stop() override;
     int32_t GetStatus(NearlinkIpShareStatus &status) override;

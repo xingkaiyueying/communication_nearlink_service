@@ -7,10 +7,11 @@ static uint8_t reserved;
 static int Prepare(const uint8_t *, uint8_t mode, uint64_t generation)
 { assert(generation == 55); if (!mode) ++rolledBack; else ++prepared; reserved=mode; return reserveFails ? -1 : 0; }
 static bool Secure(const uint8_t *, uint64_t generation) { return secure && generation == 55; }
+static bool SecureTyped(const uint8_t *, uint8_t type, uint64_t generation) { return secure && type == 0 && generation == 55; }
 static void Configured(const uint8_t *,bool,int32_t,uint8_t mode,uint64_t)
 { assert(mode == reserved); ++notified; }
 const IposlProfileCallbacks *IposlGetCallbacks()
-{ static IposlProfileCallbacks cb = {nullptr,Configured,Prepare,Secure,nullptr}; return &cb; }
+{ static IposlProfileCallbacks cb = {nullptr,Configured,Prepare,Secure,nullptr,nullptr,SecureTyped}; return &cb; }
 int main()
 {
     uint8_t peer[6] = {2,1,2,3,4,5}, bytes[11];
@@ -34,5 +35,26 @@ int main()
     OnCallMethod(7,9,&request,true,false); assert(wireResult==255 && !g_configured);
     bytes[10]=1; request.addr.addr[5]++; OnCallMethod(7,10,&request,true,false); assert(wireResult==255);
     request.addr.addr[5]--; OnCallMethod(7,11,&request,true,false); assert(wireResult==0 && g_selectedMode==1);
+    IposlServerStop();
+    assert(IposlServerStartAny(3,1,55)==0);
+    request.param.len=11; IposlCodecEncodeConfigMode(peer,3,bytes,11);
+    OnCallMethod(7,12,&request,true,false); assert(wireResult==0 && g_peers[0].used);
+    uint8_t second[6]={2,1,2,3,4,6};
+    memcpy(request.addr.addr,second,6); IposlCodecEncodeConfigMode(second,3,bytes,11);
+    OnCallMethod(7,13,&request,true,false); assert(wireResult==255);
+    IposlServerReleasePeer(peer,0);
+    OnCallMethod(7,14,&request,true,false); assert(wireResult==0 && g_peers[0].used);
+    IposlServerStop();
+    assert(IposlServerStartAny(1,7,55)==0);
+    for (uint8_t n=0;n<7;++n) {
+        uint8_t next[6]={2,1,2,3,4,static_cast<uint8_t>(10+n)};
+        memcpy(request.addr.addr,next,6);
+        IposlCodecEncodeConfigMode(next,1,bytes,11);
+        OnCallMethod(7,static_cast<uint16_t>(20+n),&request,true,false);
+        assert(wireResult==0 && g_peers[n].used);
+    }
+    uint8_t eighth[6]={2,1,2,3,4,99};
+    memcpy(request.addr.addr,eighth,6); IposlCodecEncodeConfigMode(eighth,1,bytes,11);
+    OnCallMethod(7,30,&request,true,false); assert(wireResult==255);
     IposlServerDeinit();
 }

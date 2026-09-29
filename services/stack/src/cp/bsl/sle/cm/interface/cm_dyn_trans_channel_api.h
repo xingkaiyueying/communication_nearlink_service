@@ -204,6 +204,7 @@ typedef struct {
 } CM_DynTransChanStatusIndicationRsp_S;
 
 typedef struct {
+    uint16_t lcid;
     uint16_t srcPort;
     uint16_t dstPort;
 } CM_DynTransChanEstablishedCheckParam_S;

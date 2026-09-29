@@ -122,6 +122,20 @@ int32_t NearlinkIpShareClient::IsPeerSupported(const std::string &peerAddress, b
     return ret;
 }
 
+int32_t NearlinkIpShareClient::StartGatewayAny(int32_t mode, int32_t maxTerminals) const
+{
+    if (!NearlinkHost::GetInstance().IsNearlinkSupport() || !IS_SLE_ENABLED()) return NL_ERR_SLE_OFF;
+    if (!IsIpShareMode(mode) || maxTerminals < 1 || maxTerminals > 32) return NL_ERR_INVALID_PARAM;
+    auto proxy = GetIpShareProxy();
+    return proxy == nullptr ? NL_ERR_UNAVAILABLE_PROXY : proxy->StartGatewayAny(mode, maxTerminals);
+}
+
+int32_t NearlinkIpShareClient::GetSupportedMaxTerminals() const
+{
+    auto proxy = GetIpShareProxy();
+    return proxy == nullptr ? NL_ERR_UNAVAILABLE_PROXY : proxy->GetSupportedMaxTerminals();
+}
+
 int32_t NearlinkIpShareClient::StartGateway(const std::string &peerAddress) const
 {
     HILOGI("[IpShare][Client] gateway start requested");

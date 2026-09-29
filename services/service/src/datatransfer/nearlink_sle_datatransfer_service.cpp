@@ -15,6 +15,7 @@
 
 #include "nearlink_sle_datatransfer_service.h"
 #include "nearlink_ipshare_channel.h"
+#include "nearlink_ipshare_service.h"
 #include "SleInterfaceAdapterSub.h"
 #include "SleInterfaceManager.h"
 #include "SleControllerService.h"
@@ -187,6 +188,7 @@ public:
         HILOGD("addr: %{public}s, state: %{public}d, reason: 0x%{public}x", GET_ENCRYPT_ADDR(device), state, reason);
         NL_CHECK_RETURN_LOGD(state == static_cast<int>(SleConnState::SLE_CONNECTION_STATE_DISCONNECTED), "ignore");
         std::string addr = device.GetAddress();
+        NearlinkIpShareService::GetInstance().OnPeerDisconnected(addr);
         DoInDataTransferThread([this, addr]() {
             impl_->ConnectCarReqStateChanged(addr);
         });
@@ -1214,9 +1216,10 @@ void SleDataTransferService::SendDataStateCallback(const SLE_Addr_S *devAddr, ui
     });
 }
 
-bool SleDataTransferService::CheckChannelParamCallback(uint16_t srcPort)
+bool SleDataTransferService::CheckChannelParamCallback(const SLE_Addr_S *addr, uint16_t srcPort)
 {
-    if (NearlinkIpShareChannel::IsAcceptingPort(srcPort)) {
+    if (NearlinkIpShareChannel::IsIpSharePort(srcPort)) {
+        if (!NearlinkIpShareChannel::IsAcceptingPort(addr, srcPort)) return false;
         HILOGI("[IpShare][DataTransfer] accepted IPoSL QoSM channel port=%{public}u", srcPort);
         return true;
     }

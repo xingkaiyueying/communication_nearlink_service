@@ -55,10 +55,13 @@ typedef struct IposlProfileCallbacks {
     bool (*canSend)(uint16_t lcid, uint8_t tcid, uint8_t pi, uint64_t generation);
     /* Terminal-only result of reading the gateway's complete mode bitmap. */
     void (*onPeerCapabilities)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t peerModes, uint64_t generation);
+    bool (*isSecureAddress)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint64_t generation);
 } IposlProfileCallbacks;
 
 int32_t IposlProfileInit(const IposlProfileCallbacks *callbacks);
 void IposlProfileDeinit(void);
+int32_t IposlProfileStartServerAny(uint8_t mode, uint32_t capacity, uint64_t generation);
+void IposlProfileReleaseServerPeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType);
 int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation);
 void IposlProfileStopServer(void);
 int32_t IposlProfileProbePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation);

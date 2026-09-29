@@ -31,7 +31,7 @@ public:
     NearlinkIpShareTun() = default;
     ~NearlinkIpShareTun();
 
-    int32_t Open(const PacketCallback &callback);
+    int32_t Open(const PacketCallback &callback, const std::string &ifaceName = "sleip0");
     void Close();
     int32_t Write(const uint8_t *data, uint16_t length);
     bool IsOpen() const;
@@ -46,6 +46,7 @@ private:
     std::atomic_bool running_ {false};
     PacketCallback callback_;
     std::thread reader_;
+    std::string ifaceName_;
 };
 
 }  // namespace OHOS::Nearlink

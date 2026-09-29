@@ -19,7 +19,9 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
+#include <string>
 
 #include "dtap.h"
 #include "nearlink_ipshare_tun.h"
@@ -29,7 +31,7 @@
 
 namespace OHOS::Nearlink {
 
-class NearlinkIpShareChannel final {
+class NearlinkIpShareChannel final : public std::enable_shared_from_this<NearlinkIpShareChannel> {
 public:
     static constexpr uint16_t IP_SHARE_PORT = 30200;
     using StateCallback = std::function<void(bool, int32_t, uint64_t)>;
@@ -38,7 +40,7 @@ public:
 
     int32_t Initialize(const StateCallback &callback);
     void Deinitialize();
-    int32_t CreateTun();
+    int32_t CreateTun(const std::string &ifaceName = "sleip0");
     int32_t Open(const uint8_t peer[6], uint8_t addressType);
     void Close();
     int32_t SetPeer(const uint8_t peer[6], uint8_t addressType, bool gateway = true,
@@ -53,14 +55,18 @@ public:
     bool IsCurrentGeneration(uint64_t generation);
 
     static bool IsIpSharePort(uint16_t port);
-    static bool IsAcceptingPort(uint16_t port);
+    static bool IsAcceptingPort(const SLE_Addr_S *addr, uint16_t port);
     static bool HandleChannelStatus(const QOSM_TransChannelRspParams_S *params);
     static int OnIpv4Received(DTAP_Data_Info_S *info, SDF_Buff_S *buffer);
+    NearlinkIpShareChannel() = default;
+    ~NearlinkIpShareChannel() = default;
+    NearlinkIpShareChannel(const NearlinkIpShareChannel &) = delete;
+    NearlinkIpShareChannel &operator=(const NearlinkIpShareChannel &) = delete;
 
 private:
-    NearlinkIpShareChannel() = default;
     bool ConsumeStatus(const QOSM_TransChannelRspParams_S *params);
-    bool CanAccept(uint16_t port);
+    bool CanAccept(const SLE_Addr_S *addr, uint16_t port);
+    bool OwnsChannel(uint16_t lcid, uint8_t tcid);
     int Receive(DTAP_Data_Info_S *info, SDF_Buff_S *buffer);
     int32_t Send(const uint8_t *data, uint16_t length);
     struct DhcpPacket {

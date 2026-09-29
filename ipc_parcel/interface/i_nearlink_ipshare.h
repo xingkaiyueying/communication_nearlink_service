@@ -31,6 +31,8 @@ public:
 
     virtual int32_t IsPeerSupported(const std::string &peerAddress, bool &supported) = 0;
     virtual int32_t StartGateway(const std::string &peerAddress) = 0;
+    virtual int32_t StartGatewayAny(int32_t mode, int32_t maxTerminals) = 0;
+    virtual int32_t GetSupportedMaxTerminals() = 0;
     virtual int32_t StartTerminal(const std::string &gatewayAddress) = 0;
     virtual int32_t Stop() = 0;
     virtual int32_t GetStatus(NearlinkIpShareStatus &status) = 0;

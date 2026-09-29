@@ -15,7 +15,10 @@
 #ifndef NEARLINK_IPSHARE_SERVICE_H
 #define NEARLINK_IPSHARE_SERVICE_H
 
+#include <array>
 #include <condition_variable>
+#include <memory>
+#include <vector>
 #include <mutex>
 #include <string>
 
@@ -23,6 +26,7 @@
 #include "nearlink_ipshare_status.h"
 
 namespace OHOS::Nearlink {
+class NearlinkIpShareChannel;
 
 class NearlinkIpShareService final {
 public:
@@ -34,6 +38,9 @@ public:
     int32_t UpdateValidatedAddress(const NearlinkIpShareAddressEvidence &address);
     int32_t IsPeerSupported(const std::string &peerAddress, bool &supported);
     int32_t StartGateway(const std::string &peerAddress);
+    int32_t StartGatewayAny(int32_t mode, int32_t maxTerminals);
+    int32_t GetSupportedMaxTerminals() const;
+    void OnPeerDisconnected(const std::string &peerAddress);
     int32_t StartTerminal(const std::string &gatewayAddress);
     int32_t Stop();
     int32_t GetStatus(NearlinkIpShareStatus &status) const;
@@ -56,6 +63,8 @@ private:
     void HandlePeerCapabilities(const uint8_t peer[6], uint8_t peerModes, uint64_t generation);
     void HandleConfigured(const uint8_t peer[6], bool opened, int32_t error, uint8_t mode, uint64_t generation);
     void HandleChannelState(bool established, int32_t error);
+    void HandleGatewayPeerChannel(const uint8_t peer[6], uint64_t epoch, bool established, int32_t error);
+    void ReleaseGatewayPeer(const uint8_t peer[6], uint64_t epoch);
     int32_t ValidateSecurePeer(const std::string &peerAddress, uint8_t peer[6], uint8_t &addressType) const;
     int32_t BeginRole(NearlinkIpShareRole role, const std::string &peerAddress,
         const uint8_t peer[6], uint8_t addressType, int32_t mode, uint64_t &generation);
@@ -63,9 +72,24 @@ private:
     void NotifyStatus(const NearlinkIpShareStatus &status, const sptr<INearlinkIpShareObserver> &observer) const;
     static int32_t PrepareMode(const uint8_t peer[6], uint8_t mode, uint64_t generation);
     static bool IsSecure(const uint8_t peer[6], uint64_t generation);
+    static bool IsSecureAddress(const uint8_t peer[6], uint8_t addressType, uint64_t generation);
     bool IsCurrent(uint64_t generation) const;
     void StampLocked();
+    struct GatewayPeer {
+        std::array<uint8_t, 6> address{};
+        uint8_t addressType{0};
+        uint64_t epoch{0};
+        uint8_t selectedMode{0};
+        bool configured{false};
+        bool active{false};
+        bool releasing{false};
+        std::shared_ptr<NearlinkIpShareChannel> channel;
+    };
+    GatewayPeer *FindGatewayPeerLocked(const uint8_t peer[6]) const;
     NearlinkIpShareCapabilities capabilities_;
+    std::vector<std::unique_ptr<GatewayPeer>> gatewayPeers_;
+    bool gatewayAny_{false};
+    int32_t maxTerminals_{0};
     uint64_t generationCounter_ {0};
     void StopNow();
 

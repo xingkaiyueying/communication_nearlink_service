@@ -25,7 +25,7 @@ namespace OHOS::Nearlink {
 bool NearlinkIpShareService::CanSend(uint16_t l, uint8_t t, uint8_t p, uint64_t g)
 { return secure && NearlinkIpShareChannel::GetInstance().CanSend(l,t,p,g); }
 NearlinkIpShareTun::~NearlinkIpShareTun() {}
-int32_t NearlinkIpShareTun::Open(const PacketCallback &) { fd_ = 1; return 0; }
+int32_t NearlinkIpShareTun::Open(const PacketCallback &, const std::string &) { fd_ = 1; return 0; }
 void NearlinkIpShareTun::Close() { fd_ = -1; }
 int32_t NearlinkIpShareTun::Write(const uint8_t *, uint16_t) { ++tunWrites; return fd_ >= 0 ? 0 : -1; }
 bool NearlinkIpShareTun::IsOpen() const { return fd_ >= 0; }
@@ -44,11 +44,18 @@ int main()
     assert(c.Initialize([](bool,int32_t,uint64_t){}) == 0);
     assert(!registered[1] && !registered[2]);
     assert(c.SetPeer(peer,0,true,peer,local,10) == 0 && c.CreateTun() == 0);
-    assert(!c.IsAcceptingPort(c.IP_SHARE_PORT));
+    SLE_Addr_S peerAddrForAdmission = {};
+    memcpy(peerAddrForAdmission.addr, peer, 6);
+    assert(!c.IsAcceptingPort(&peerAddrForAdmission, c.IP_SHARE_PORT));
     failPi = 2; assert(c.PrepareMode(3) != 0 && !registered[1] && !registered[2]);
     failPi = 0; assert(c.PrepareMode(3) == 0 && registered[1] && registered[2]);
     assert(c.EnableMode(1) != 0 && c.EnableMode(3) == 0 && c.Open(peer,0) == 0);
-    QOSM_TransChannelRspParams_S rsp = {};
+    // Passive admission must bind to the authenticated peer before a delayed QoSM status arrives.
+    auto wrongPeer = peerAddrForAdmission;
+    wrongPeer.addr[1] ^= 1;
+    assert(!c.IsAcceptingPort(&wrongPeer, c.IP_SHARE_PORT));
+    assert(!c.IsAcceptingPort(&peerAddrForAdmission, c.IP_SHARE_PORT)); // active create is already pending
+    QOSM_TransChannelRspParams_S rsp = {}; rsp.mtu=1500;
     memcpy(rsp.addr.addr,peer,6); rsp.srcPort = rsp.dstPort = c.IP_SHARE_PORT;
     rsp.lcid = 3; rsp.tcid = 4; rsp.status = QOSM_TRANS_CHANNEL_ESTABLISHED;
     c.HandleChannelStatus(&rsp);

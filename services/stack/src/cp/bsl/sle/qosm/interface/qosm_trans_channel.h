@@ -121,7 +121,7 @@ typedef void (*QOSM_TransChannelStatusCbk)(const QOSM_TransChannelRspParams_S *r
  * @param srcPort 业务源端口号
  * @return bool 合法返回true，否则返回false
  */
-typedef bool (*QOSM_TransChannelEstablishedCheckCbk)(uint16_t srcPort);
+typedef bool (*QOSM_TransChannelEstablishedCheckCbk)(const SLE_Addr_S *addr, uint16_t srcPort);
 
 typedef struct {
     QOSM_TransChannelStatusCbk statusCbk;

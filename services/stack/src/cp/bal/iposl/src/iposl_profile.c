@@ -68,6 +68,19 @@ void IposlProfileDeinit(void)
     NLSTK_LOG_INFO("[IpShare][IPoSL] profile deinit completed");
 }
 
+int32_t IposlProfileStartServerAny(uint8_t mode, uint32_t capacity, uint64_t generation)
+{
+    if (!g_initialized) return IPOSL_ERR_INVALID_STATE;
+    int32_t ret = IposlServerStartAny(mode, capacity, generation);
+    if (ret == IPOSL_SUCCESS) atomic_store(&g_sendGeneration, generation);
+    return ret;
+}
+
+void IposlProfileReleaseServerPeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
+{
+    IposlServerReleasePeer(peer, addressType);
+}
+
 int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation)
 {
     if (!g_initialized) {

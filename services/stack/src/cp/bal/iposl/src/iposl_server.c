@@ -15,6 +15,7 @@
 #include "iposl_internal.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "iposl_codec.h"
 #include "nlstk_log.h"
@@ -53,6 +54,35 @@ static uint8_t g_selectedMode;
 static bool g_enabled;
 static uint64_t g_generation;
 
+/* Allocated to the product's configured capacity, never to a fixed peer count. */
+typedef struct {
+    bool used;
+    bool enabled;
+    uint8_t peer[IPOSL_LAYER2_ID_LEN];
+    uint8_t addressType;
+    uint8_t layer2[IPOSL_LAYER2_ID_LEN];
+    uint8_t mode;
+} IposlServerPeer;
+static IposlServerPeer *g_peers;
+static uint32_t g_peerCapacity;
+static bool g_anyPeer;
+
+static IposlServerPeer *FindPeer(const SLE_Addr_S *addr)
+{
+    if (addr == NULL || !g_anyPeer) return NULL;
+    for (uint32_t i = 0; i < g_peerCapacity; ++i) {
+        if (g_peers[i].used && g_peers[i].addressType == addr->type &&
+            memcmp(g_peers[i].peer, addr->addr, IPOSL_LAYER2_ID_LEN) == 0) return &g_peers[i];
+    }
+    return NULL;
+}
+
+static IposlServerPeer *FreePeer(void)
+{
+    for (uint32_t i = 0; i < g_peerCapacity; ++i) if (!g_peers[i].used) return &g_peers[i];
+    return NULL;
+}
+
 static void SetUuid(NLSTK_SsapUuid_S *uuid, const uint8_t value[16])
 {
     (void)memcpy(uuid->uuid, value, sizeof(uuid->uuid));
@@ -80,15 +110,20 @@ static void FillProperty(NLSTK_SsapServicePropertyParam_S *property, const uint8
 static void OnReadPropertyAuthorize(int32_t appId, uint16_t requestId,
     NLSTK_SsapServerReadPropertyInfo_S *property)
 {
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    IposlServerPeer *entry = property == NULL ? NULL : FindPeer(&property->addr);
     bool allow = appId == g_serverAppId && g_serverActive && property != NULL &&
-        IsExpectedPeer(&property->addr);
+        (g_anyPeer ? callbacks != NULL && callbacks->isSecureAddress != NULL &&
+        callbacks->isSecureAddress(property->addr.addr, property->addr.type, g_generation) :
+        IsExpectedPeer(&property->addr));
     if (allow && memcmp(property->uuid.uuid, g_gatewayStateUuid, sizeof(g_gatewayStateUuid)) == 0) {
         uint8_t state[IPOSL_GATEWAY_CAPABILITY_LEN];
-        memcpy(state, g_configured ? g_iposlGatewayServing : g_iposlEmptyState,
-            g_configured ? sizeof(state) : IPOSL_EMPTY_STATE_LEN);
-        if (g_configured) state[11] = g_selectedMode;
+        bool configured = g_anyPeer ? entry != NULL : g_configured;
+        memcpy(state, configured ? g_iposlGatewayServing : g_iposlEmptyState,
+            configured ? sizeof(state) : IPOSL_EMPTY_STATE_LEN);
+        if (configured) state[11] = g_anyPeer ? entry->mode : g_selectedMode;
         NLSTK_VariableData_S value = {
-            .len = (uint16_t)(g_configured ? sizeof(state) : IPOSL_EMPTY_STATE_LEN), .data = state
+            .len = (uint16_t)(configured ? sizeof(state) : IPOSL_EMPTY_STATE_LEN), .data = state
         };
         /* Both operations copy their data and enqueue on the same SSAP worker, update before read reply. */
         allow = NLSTK_SsapServerUpdatePropertyValue(appId, property->handle, &value) == NLSTK_ERRCODE_SUCCESS;
@@ -148,9 +183,70 @@ static int32_t AddConfigService(void)
     return IPOSL_SUCCESS;
 }
 
+static void OnCallMethodAny(int32_t appId, uint16_t requestId,
+    NLSTK_SsapServerCallMethodRequestInfo_S *method, bool needReturn, bool needAuth)
+{
+    uint8_t opcode = 0, layer2[IPOSL_LAYER2_ID_LEN] = {0}, response[IPOSL_RESPONSE_LEN] = {0};
+    uint8_t result = 0xff;
+    int32_t decoded = method == NULL ? IPOSL_ERR_INVALID_PARAM :
+        IposlCodecDecodeRequest(method->param.data, method->param.len, &opcode, layer2);
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    bool accepted = g_serverActive && appId == g_serverAppId && method != NULL && method->handle != 0 &&
+        decoded == IPOSL_SUCCESS && callbacks != NULL &&
+        callbacks->isSecureAddress != NULL &&
+        callbacks->isSecureAddress(method->addr.addr, method->addr.type, g_generation) &&
+        memcmp(layer2, method->addr.addr, IPOSL_LAYER2_ID_LEN) == 0;
+    IposlServerPeer *entry = accepted ? FindPeer(&method->addr) : NULL;
+    IposlServerPeer *candidate = NULL;
+    uint8_t mode = accepted && opcode == IPOSL_OPCODE_CONFIGURE ? method->param.data[10] : 0;
+    bool reserved = false;
+    if (accepted && opcode == IPOSL_OPCODE_CONFIGURE &&
+        (mode == 1 || (mode == 3 && g_allowedMode == 3))) {
+        if (entry != NULL) {
+            result = entry->mode == mode ? 0 : 0xff;
+        } else if ((candidate = FreePeer()) != NULL &&
+            callbacks->prepareMode(method->addr.addr, mode, g_generation) == 0) {
+            reserved = true;
+            result = 0;
+        }
+    } else if (accepted && opcode == IPOSL_OPCODE_ENABLE && entry != NULL &&
+        memcmp(entry->layer2, layer2, IPOSL_LAYER2_ID_LEN) == 0) {
+        result = 0;
+    }
+    bool delivered = false;
+    if (method != NULL && needReturn &&
+        IposlCodecEncodeResponse(opcode, layer2, result, response, sizeof(response)) > 0) {
+        NLSTK_VariableData_S value = {.len = sizeof(response), .data = response};
+        delivered = NLSTK_SsapServerSendMethodCallRes(g_serverAppId, requestId, &value) == NLSTK_ERRCODE_SUCCESS;
+    } else if (needAuth) {
+        (void)NLSTK_SsapServerAuthorizeResult(g_serverAppId, requestId, accepted);
+    }
+    if (reserved && !delivered) (void)callbacks->prepareMode(method->addr.addr, 0, g_generation);
+    if (!delivered || result != 0) return;
+    if (reserved) {
+        candidate->used = true;
+        candidate->enabled = false;
+        candidate->addressType = method->addr.type;
+        candidate->mode = mode;
+        memcpy(candidate->peer, method->addr.addr, IPOSL_LAYER2_ID_LEN);
+        memcpy(candidate->layer2, layer2, IPOSL_LAYER2_ID_LEN);
+        entry = candidate;
+    }
+    if (opcode == IPOSL_OPCODE_CONFIGURE && reserved) {
+        callbacks->onConfigured(entry->peer, false, 0, entry->mode, g_generation);
+    } else if (opcode == IPOSL_OPCODE_ENABLE && !entry->enabled) {
+        entry->enabled = true;
+        callbacks->onConfigured(entry->peer, true, 0, entry->mode, g_generation);
+    }
+}
+
 static void OnCallMethod(int32_t appId, uint16_t requestId, NLSTK_SsapServerCallMethodRequestInfo_S *method,
     bool needReturn, bool needAuth)
 {
+    if (g_anyPeer) {
+        OnCallMethodAny(appId, requestId, method, needReturn, needAuth);
+        return;
+    }
     uint8_t opcode = 0;
     uint8_t layer2[IPOSL_LAYER2_ID_LEN] = {0};
     uint8_t response[IPOSL_RESPONSE_LEN] = {0};
@@ -242,6 +338,34 @@ int32_t IposlServerInitialize(void)
     return IPOSL_SUCCESS;
 }
 
+int32_t IposlServerStartAny(uint8_t mode, uint32_t capacity, uint64_t generation)
+{
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    if (callbacks == NULL || callbacks->isSecureAddress == NULL ||
+        g_serverAppId == SSAP_APP_INVALID_ID || g_serverActive ||
+        (mode != 1 && mode != 3) || capacity == 0 || capacity > 32 || generation == 0) {
+        return IPOSL_ERR_INVALID_PARAM;
+    }
+    g_peers = (IposlServerPeer *)calloc(capacity, sizeof(*g_peers));
+    if (g_peers == NULL) return IPOSL_ERR_INVALID_STATE;
+    g_peerCapacity = capacity;
+    g_allowedMode = mode;
+    g_generation = generation;
+    g_anyPeer = true;
+    g_serverActive = true;
+    return IPOSL_SUCCESS;
+}
+
+void IposlServerReleasePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
+{
+    if (peer == NULL || !g_anyPeer) return;
+    SLE_Addr_S addr = {0};
+    addr.type = addressType;
+    memcpy(addr.addr, peer, IPOSL_LAYER2_ID_LEN);
+    IposlServerPeer *entry = FindPeer(&addr);
+    if (entry != NULL) memset(entry, 0, sizeof(*entry));
+}
+
 int32_t IposlServerStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation)
 {
     if (peer == NULL || g_serverAppId == SSAP_APP_INVALID_ID || g_serverActive) {
@@ -272,6 +396,10 @@ void IposlServerStop(void)
     g_enabled = false;
     g_selectedMode = 0;
     g_generation = 0;
+    free(g_peers);
+    g_peers = NULL;
+    g_peerCapacity = 0;
+    g_anyPeer = false;
     NLSTK_LOG_INFO("[IpShare][IPoSL][Server] stop completed wasActive=%d", wasActive);
 }
 

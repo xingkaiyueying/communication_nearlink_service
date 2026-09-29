@@ -22,6 +22,8 @@ extern "C" int32_t IposlProfileInit(const IposlProfileCallbacks *c) { profileCal
 extern "C" void IposlProfileDeinit() {}
 extern "C" void IposlProfileStopClient() {}
 extern "C" void IposlProfileStopServer() {}
+extern "C" int32_t IposlProfileStartServerAny(uint8_t,uint32_t,uint64_t g) { profileGeneration=g; ++starts; return 0; }
+extern "C" void IposlProfileReleaseServerPeer(const uint8_t *,uint8_t) {}
 extern "C" int32_t IposlProfileStartServer(const uint8_t *,uint8_t,uint8_t,uint64_t g) { profileGeneration=g; ++starts; return 0; }
 extern "C" int32_t IposlProfileStartTerminal(const uint8_t *,uint8_t,const uint8_t *,uint8_t,uint64_t g)
 { profileGeneration=g; ++starts; return 0; }
@@ -31,7 +33,7 @@ extern "C" uint32_t QOSM_TransChannelCreate(const QOSM_TransChannelParams_S *) {
 extern "C" uint32_t QOSM_TransChannelDestroy(const QOSM_TransChannelReleaseParams_S *) { return 0; }
 namespace OHOS::Nearlink {
 NearlinkIpShareTun::~NearlinkIpShareTun() {}
-int32_t NearlinkIpShareTun::Open(const PacketCallback &) { fd_=1; return 0; }
+int32_t NearlinkIpShareTun::Open(const PacketCallback &, const std::string &) { fd_=1; return 0; }
 void NearlinkIpShareTun::Close() { fd_=-1; }
 int32_t NearlinkIpShareTun::Write(const uint8_t *,uint16_t) { ++writes; return 0; }
 bool NearlinkIpShareTun::IsOpen() const { return fd_>=0; }
@@ -66,7 +68,7 @@ int main()
     assert(profileCallbacks.prepareMode(peer,3,first)==0);
     profileCallbacks.onConfigured(peer,false,0,3,first); DrainTasks();
     profileCallbacks.onConfigured(peer,true,0,3,first); DrainTasks();
-    QOSM_TransChannelRspParams_S rsp={}; memcpy(rsp.addr.addr,peer,6);
+    QOSM_TransChannelRspParams_S rsp={}; rsp.mtu=1500; memcpy(rsp.addr.addr,peer,6);
     rsp.srcPort=rsp.dstPort=c.IP_SHARE_PORT; rsp.lcid=3; rsp.tcid=4; rsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED;
     c.HandleChannelStatus(&rsp); DrainTasks();
     NearlinkIpShareStatus status; s.GetStatus(status);
@@ -90,7 +92,13 @@ int main()
     assert(profileCallbacks.prepareMode(peer,3,first)!=0);
     assert(profileCallbacks.prepareMode(peer,3,next)==0);
     profileCallbacks.onConfigured(peer,false,0,3,next); profileCallbacks.onConfigured(peer,true,0,3,next); DrainTasks();
-    assert(c.IsAcceptingPort(c.IP_SHARE_PORT));
+    SLE_Addr_S peerAddrForAdmission = {};
+    memcpy(peerAddrForAdmission.addr, peer, 6);
+    auto otherAddrForAdmission = peerAddrForAdmission;
+    otherAddrForAdmission.addr[5] ^= 1;
+    assert(!c.IsAcceptingPort(&otherAddrForAdmission, c.IP_SHARE_PORT));
+    assert(c.IsAcceptingPort(&peerAddrForAdmission, c.IP_SHARE_PORT));
+    assert(c.channelPending_ && !c.IsAcceptingPort(&peerAddrForAdmission, c.IP_SHARE_PORT));
     supported=false;
     assert(s.IsPeerSupported(address,supported)==0 && supported);
     assert(s.QueryNearlinkIpShareCapabilities(address,capabilities)==0 && capabilities.identifierPresent);
@@ -109,4 +117,58 @@ int main()
     assert(s.StartTerminal(address)==0); DrainTasks(); s.GetStatus(status);
     assert(status.state==NearlinkIpShareState::DISCOVERING); // queued old stop cannot kill new generation
     s.Stop(); DrainTasks(); s.Shutdown();
+    assert(s.Initialize()==0);
+    OHOS::system::mockMaxTerminals=2;
+    assert(s.StartGatewayAny(1,0)!=0 && s.StartGatewayAny(1,3)!=0);
+    assert(s.StartGatewayAny(1,1)==0); DrainTasks();
+    s.GetStatus(status); assert(status.role==NearlinkIpShareRole::GATEWAY &&
+        status.state==NearlinkIpShareState::SERVING_NO_UPSTREAM && status.peerAddress.empty());
+    uint64_t gatewayGen=status.generation;
+    uint8_t second[6]={2,1,2,3,4,6};
+    assert(profileCallbacks.prepareMode(peer,1,gatewayGen)==0);
+    assert(profileCallbacks.prepareMode(second,1,gatewayGen)!=0); // one atomic IP seat
+    profileCallbacks.onConfigured(peer,false,0,1,gatewayGen);
+    profileCallbacks.onConfigured(peer,true,0,1,gatewayGen); DrainTasks();
+    auto firstChannel=s.gatewayPeers_[0]->channel;
+    assert(firstChannel->tun_.IsOpen() && c.IsDrained());
+    QOSM_TransChannelRspParams_S firstRsp={}; firstRsp.mtu=1500; memcpy(firstRsp.addr.addr,peer,6);
+    firstRsp.srcPort=firstRsp.dstPort=c.IP_SHARE_PORT;
+    firstRsp.lcid=13; firstRsp.tcid=4; firstRsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED;
+    assert(c.HandleChannelStatus(&firstRsp)); DrainTasks();
+    assert(s.gatewayPeers_[0]->active && firstChannel->CanSend(13,4,1,s.gatewayPeers_[0]->epoch));
+    firstRsp.status=QOSM_TRANS_CHANNEL_RELEASED; c.HandleChannelStatus(&firstRsp); DrainTasks();
+    assert(s.gatewayPeers_[0]==nullptr && s.GetStatus(status)==0 && status.serviceReady);
+    assert(profileCallbacks.prepareMode(second,1,gatewayGen)==0); // released slot reusable
+    assert(s.Stop()==0); DrainTasks(); s.GetStatus(status); assert(status.state==NearlinkIpShareState::IDLE);
+    assert(s.StartGatewayAny(3,2)==0); DrainTasks(); s.GetStatus(status); gatewayGen=status.generation;
+    assert(profileCallbacks.prepareMode(peer,3,gatewayGen)==0);
+    assert(profileCallbacks.prepareMode(second,1,gatewayGen)==0);
+    assert(s.gatewayPeers_[0]!=nullptr && s.gatewayPeers_[1]!=nullptr);
+    profileCallbacks.onConfigured(peer,true,0,3,gatewayGen);
+    profileCallbacks.onConfigured(second,true,0,1,gatewayGen); DrainTasks();
+    assert(s.gatewayPeers_[0]->channel->tun_.IsOpen() && s.gatewayPeers_[1]->channel->tun_.IsOpen());
+    s.OnPeerDisconnected(address); DrainTasks();
+    assert(s.gatewayPeers_[0]==nullptr && s.gatewayPeers_[1]!=nullptr &&
+        s.gatewayPeers_[1]->channel->tun_.IsOpen()); // A2 survives A1 departure
+    assert(s.Stop()==0); DrainTasks(); s.GetStatus(status); assert(status.state==NearlinkIpShareState::IDLE);
+    assert(s.StartGatewayAny(1,1)==0); DrainTasks(); s.GetStatus(status); gatewayGen=status.generation;
+    std::atomic<int> aResult{99}, bResult{99};
+    std::thread aThread([&]() { aResult=profileCallbacks.prepareMode(peer,1,gatewayGen); });
+    std::thread bThread([&]() { bResult=profileCallbacks.prepareMode(second,1,gatewayGen); });
+    aThread.join(); bThread.join();
+    assert((aResult==0)!=(bResult==0)); // near-simultaneous claims have exactly one winner
+    assert(s.Stop()==0); DrainTasks(); s.GetStatus(status); assert(status.state==NearlinkIpShareState::IDLE);
+    for (int capacity : {3, 5, 7}) {
+        OHOS::system::mockMaxTerminals=capacity;
+        assert(s.StartGatewayAny(1,capacity)==0); DrainTasks(); s.GetStatus(status); gatewayGen=status.generation;
+        for (uint8_t n=0;n<capacity;++n) {
+            uint8_t next[6]={2,1,2,3,4,static_cast<uint8_t>(10+n)};
+            assert(profileCallbacks.prepareMode(next,1,gatewayGen)==0);
+        }
+        uint8_t overflow[6]={2,1,2,3,4,99};
+        assert(profileCallbacks.prepareMode(overflow,1,gatewayGen)!=0);
+        assert(s.Stop()==0); DrainTasks(); s.GetStatus(status);
+        assert(status.state==NearlinkIpShareState::IDLE);
+    }
+    s.Shutdown();
 }

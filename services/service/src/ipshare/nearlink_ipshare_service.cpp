@@ -26,6 +26,7 @@
 #include "nearlink_ipshare_channel.h"
 #include "nearlink_utils.h"
 #include "raw_address.h"
+#include "parameters.h"
 
 namespace OHOS::Nearlink {
 namespace {
@@ -36,7 +37,23 @@ constexpr int32_t IP_SHARE_LINK_NOT_SECURE = -3;
 constexpr int32_t IP_SHARE_PROFILE_FAILED = -4;
 constexpr int32_t IP_SHARE_RESOURCE_FAILED = -5;
 constexpr auto SUPPORT_WAIT = std::chrono::seconds(30);
+constexpr int32_t IP_SHARE_MAX_CAPACITY_LIMIT = 32;
+constexpr const char *MAX_TERMINALS_PARAM = "persist.nearlink.ipshare.max_terminals";
 } // namespace
+
+int32_t NearlinkIpShareService::GetSupportedMaxTerminals() const
+{
+    int32_t configured = OHOS::system::GetIntParameter(MAX_TERMINALS_PARAM, 2);
+    return configured > 0 && configured <= IP_SHARE_MAX_CAPACITY_LIMIT ? configured : 0;
+}
+
+NearlinkIpShareService::GatewayPeer *NearlinkIpShareService::FindGatewayPeerLocked(const uint8_t peer[6]) const
+{
+    for (const auto &entry : gatewayPeers_) {
+        if (entry != nullptr && memcmp(entry->address.data(), peer, 6) == 0) return entry.get();
+    }
+    return nullptr;
+}
 
 NearlinkIpShareService &NearlinkIpShareService::GetInstance()
 {
@@ -59,6 +76,7 @@ int32_t NearlinkIpShareService::Initialize()
         .isSecure = &NearlinkIpShareService::IsSecure,
         .canSend = &NearlinkIpShareService::CanSend,
         .onPeerCapabilities = &NearlinkIpShareService::OnPeerCapabilities,
+        .isSecureAddress = &NearlinkIpShareService::IsSecureAddress,
     };
     int32_t profileRet = IposlProfileInit(&callbacks);
     if (profileRet != IPOSL_SUCCESS) {
@@ -267,6 +285,54 @@ int32_t NearlinkIpShareService::BeginRole(NearlinkIpShareRole role, const std::s
     return IP_SHARE_OK;
 }
 
+int32_t NearlinkIpShareService::StartGatewayAny(int32_t mode, int32_t maxTerminals)
+{
+    const int32_t supported = GetSupportedMaxTerminals();
+    if (!IsIpShareMode(mode) || supported == 0 || maxTerminals < 1 || maxTerminals > supported) {
+        return IP_SHARE_INVALID_ARGUMENT;
+    }
+    uint64_t generation = 0;
+    NearlinkIpShareStatus snapshot;
+    sptr<INearlinkIpShareObserver> observer;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (gatewayAny_ && status_.role == NearlinkIpShareRole::GATEWAY &&
+            status_.state != NearlinkIpShareState::STOPPING && status_.state != NearlinkIpShareState::ERROR &&
+            static_cast<int32_t>(status_.requestedMode) == mode && maxTerminals_ == maxTerminals) return IP_SHARE_OK;
+        if (!initialized_ || probeInProgress_ || status_.role != NearlinkIpShareRole::NONE ||
+            status_.state != NearlinkIpShareState::IDLE) return IP_SHARE_INVALID_STATE;
+        gatewayPeers_.clear();
+        gatewayPeers_.resize(static_cast<size_t>(maxTerminals));
+        gatewayAny_ = true;
+        maxTerminals_ = maxTerminals;
+        status_ = {};
+        status_.generation = ++generationCounter_;
+        generation = status_.generation;
+        status_.contextId = "ipshare-" + std::to_string(generation);
+        status_.requestedMode = static_cast<NearlinkIpShareMode>(mode);
+        status_.role = NearlinkIpShareRole::GATEWAY;
+        status_.state = NearlinkIpShareState::STARTING;
+        StampLocked();
+        snapshot = status_;
+        observer = observer_;
+    }
+    NotifyStatus(snapshot, observer);
+    DoInIpShareThread([this, mode, maxTerminals, generation]() {
+        if (!IsCurrent(generation)) return;
+        if (IposlProfileStartServerAny(static_cast<uint8_t>(mode),
+            static_cast<uint32_t>(maxTerminals), generation) != IPOSL_SUCCESS) {
+            SetState(NearlinkIpShareState::ERROR, "gateway-listen", IP_SHARE_PROFILE_FAILED);
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            status_.serviceReady = true;
+        }
+        SetState(NearlinkIpShareState::SERVING_NO_UPSTREAM);
+    });
+    return IP_SHARE_OK;
+}
+
 int32_t NearlinkIpShareService::StartGateway(const std::string &peerAddress)
 {
     return StartNearlinkGatewayWithMode(peerAddress, 1);
@@ -376,11 +442,21 @@ void NearlinkIpShareService::StopNow()
     HILOGI("[IpShare][Service] stop cleanup started");
     IposlProfileStopClient();
     IposlProfileStopServer();
+    for (auto &entry : gatewayPeers_) if (entry != nullptr) {
+        entry->releasing = true;
+        entry->channel->Close();
+    }
     NearlinkIpShareChannel::GetInstance().Close();
-    if (!NearlinkIpShareChannel::GetInstance().IsDrained()) {
+    bool peersDrained = true;
+    for (auto &entry : gatewayPeers_) if (entry != nullptr && !entry->channel->IsDrained()) peersDrained = false;
+    if (!peersDrained || !NearlinkIpShareChannel::GetInstance().IsDrained()) {
         SetState(NearlinkIpShareState::STOPPING);
         return;
     }
+    for (auto &entry : gatewayPeers_) if (entry != nullptr) entry->channel->Deinitialize();
+    gatewayPeers_.clear();
+    gatewayAny_ = false;
+    maxTerminals_ = 0;
     NearlinkIpShareStatus status;
     sptr<INearlinkIpShareObserver> observer;
     {
@@ -525,6 +601,43 @@ void NearlinkIpShareService::OnConfigured(const uint8_t peer[6], bool opened, in
 
 void NearlinkIpShareService::HandleConfigured(const uint8_t peer[6], bool opened, int32_t error, uint8_t mode, uint64_t generation)
 {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (gatewayAny_ && generation == status_.generation && status_.role == NearlinkIpShareRole::GATEWAY) {
+            auto *entry = FindGatewayPeerLocked(peer);
+            if (entry == nullptr || entry->releasing) return;
+            if (error != 0) {
+                entry->releasing = true;
+            } else {
+                entry->configured = true;
+                entry->selectedMode = mode;
+            }
+        } else if (gatewayAny_) return;
+    }
+    if (gatewayAny_) {
+        if (error != 0) {
+            ReleaseGatewayPeer(peer, 0);
+            return;
+        }
+        if (!opened) return;
+        NearlinkIpShareChannel *channel = nullptr;
+        size_t slot = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (; slot < gatewayPeers_.size(); ++slot) {
+                if (gatewayPeers_[slot] != nullptr &&
+                    memcmp(gatewayPeers_[slot]->address.data(), peer, 6) == 0) {
+                    channel = gatewayPeers_[slot]->channel.get();
+                    break;
+                }
+            }
+        }
+        if (channel == nullptr || channel->EnableMode(mode) != 0 ||
+            channel->CreateTun("sleip" + std::to_string(slot)) != 0) {
+            ReleaseGatewayPeer(peer, 0);
+        }
+        return;
+    }
     NearlinkIpShareRole role;
     std::array<uint8_t, 6> activePeer{};
     uint8_t addressType = 0;
@@ -669,6 +782,71 @@ bool NearlinkIpShareService::IsCurrent(uint64_t generation) const
         status_.state != NearlinkIpShareState::ERROR;
 }
 
+void NearlinkIpShareService::HandleGatewayPeerChannel(const uint8_t peer[6], uint64_t epoch,
+    bool established, int32_t error)
+{
+    bool stop = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto *entry = FindGatewayPeerLocked(peer);
+        if (entry == nullptr || entry->epoch != epoch) return;
+        if (status_.state == NearlinkIpShareState::STOPPING) stop = true;
+        else if (!gatewayAny_ || status_.role != NearlinkIpShareRole::GATEWAY) return;
+        else if (established) {
+            entry->active = true;
+            return;
+        } else entry->releasing = true;
+    }
+    if (stop) StopNow();
+    else ReleaseGatewayPeer(peer, epoch);
+}
+
+void NearlinkIpShareService::OnPeerDisconnected(const std::string &peerAddress)
+{
+    if (!IsValidAddress(peerAddress)) return;
+    uint8_t peer[6] = {};
+    RawAddress(peerAddress).ConvertToUint8(peer, 6);
+    std::array<uint8_t, 6> address{};
+    memcpy(address.data(), peer, address.size());
+    DoInIpShareThread([address]() {
+        auto &service = GetInstance();
+        {
+            std::lock_guard<std::mutex> lock(service.mutex_);
+            if (!service.gatewayAny_ || service.FindGatewayPeerLocked(address.data()) == nullptr) return;
+        }
+        service.ReleaseGatewayPeer(address.data(), 0);
+    });
+}
+
+void NearlinkIpShareService::ReleaseGatewayPeer(const uint8_t peer[6], uint64_t epoch)
+{
+    std::shared_ptr<NearlinkIpShareChannel> channel;
+    uint64_t retiringEpoch = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto *entry = FindGatewayPeerLocked(peer);
+        if (entry == nullptr || (epoch != 0 && entry->epoch != epoch)) return;
+        entry->releasing = true; // Occupies its seat until QoSM and TUN have drained.
+        retiringEpoch = entry->epoch;
+        channel = entry->channel;
+    }
+    channel->Close(); // TUN reader joins outside the service lock.
+    if (!channel->IsDrained()) return;
+    std::unique_ptr<GatewayPeer> retired;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto &entry : gatewayPeers_) {
+            if (entry != nullptr && entry->epoch == retiringEpoch && entry->channel == channel) {
+                retired = std::move(entry);
+                break;
+            }
+        }
+    }
+    if (retired == nullptr) return;
+    retired->channel->Deinitialize();
+    IposlProfileReleaseServerPeer(peer, retired->addressType);
+}
+
 bool NearlinkIpShareService::IsSecure(const uint8_t peer[6], uint64_t generation)
 {
     auto &service = GetInstance();
@@ -678,17 +856,73 @@ bool NearlinkIpShareService::IsSecure(const uint8_t peer[6], uint64_t generation
         if (!service.initialized_ || service.status_.generation != generation ||
             service.status_.state == NearlinkIpShareState::STOPPING ||
             service.status_.state == NearlinkIpShareState::IDLE ||
-            service.status_.state == NearlinkIpShareState::ERROR || memcmp(service.peer_, peer, 6) != 0) return false;
-        address = service.status_.peerAddress;
+            service.status_.state == NearlinkIpShareState::ERROR) return false;
+        if (!service.gatewayAny_ && memcmp(service.peer_, peer, 6) != 0) return false;
+        address = service.gatewayAny_ ? RawAddress::ConvertToString(peer) : service.status_.peerAddress;
     }
     uint8_t verified[6], type = 0;
     return service.ValidateSecurePeer(address, verified, type) == 0 && memcmp(verified, peer, 6) == 0;
 }
 
+bool NearlinkIpShareService::IsSecureAddress(const uint8_t peer[6], uint8_t addressType, uint64_t generation)
+{
+    if (!IsSecure(peer, generation)) return false;
+    uint8_t verified[6] = {}, type = 0;
+    auto &service = GetInstance();
+    return service.ValidateSecurePeer(RawAddress::ConvertToString(peer), verified, type) == 0 &&
+        type == addressType && memcmp(verified, peer, 6) == 0;
+}
+
 int32_t NearlinkIpShareService::PrepareMode(const uint8_t peer[6], uint8_t mode, uint64_t generation)
 {
-    if (!IsSecure(peer, generation)) return IP_SHARE_LINK_NOT_SECURE;
     auto &service = GetInstance();
+    if (mode != 0 && !IsSecure(peer, generation)) return IP_SHARE_LINK_NOT_SECURE;
+    if (service.gatewayAny_ && mode == 0) {
+        {
+            std::lock_guard<std::mutex> lock(service.mutex_);
+            auto *entry = service.FindGatewayPeerLocked(peer);
+            if (generation != service.status_.generation || entry == nullptr || entry->configured) return -1;
+        }
+        service.ReleaseGatewayPeer(peer, 0);
+        return 0;
+    }
+    if (service.gatewayAny_) {
+        std::lock_guard<std::mutex> lock(service.mutex_);
+        if (generation != service.status_.generation ||
+            service.status_.state == NearlinkIpShareState::STOPPING ||
+            (mode != 0 && mode != 1 && mode != 3) ||
+            (mode == 3 && service.status_.requestedMode != NearlinkIpShareMode::DUAL_STACK)) return -1;
+        auto *existing = service.FindGatewayPeerLocked(peer);
+        if (existing != nullptr) return existing->selectedMode == mode ? 0 : -1;
+        size_t slot = 0;
+        while (slot < service.gatewayPeers_.size() && service.gatewayPeers_[slot] != nullptr) ++slot;
+        if (slot == service.gatewayPeers_.size()) return -1;
+        uint8_t verified[6] = {}, type = 0;
+        if (service.ValidateSecurePeer(RawAddress::ConvertToString(peer), verified, type) != 0 ||
+            memcmp(verified, peer, 6) != 0) return -1;
+        auto entry = std::make_unique<GatewayPeer>();
+        entry->address = {peer[0], peer[1], peer[2], peer[3], peer[4], peer[5]};
+        entry->addressType = type;
+        entry->epoch = ++service.generationCounter_;
+        auto epoch = entry->epoch;
+        auto address = entry->address;
+        entry->channel = std::make_shared<NearlinkIpShareChannel>();
+        if (entry->channel->Initialize([address, epoch](bool ready, int32_t error, uint64_t reported) {
+            if (reported != epoch) return;
+            DoInIpShareThread([address, epoch, ready, error]() {
+                NearlinkIpShareService::GetInstance().HandleGatewayPeerChannel(address.data(), epoch, ready, error);
+            });
+        }) != 0) return -1;
+        SLE_Addr_S local = SleProperties::GetInstance().GetLocalSleAddress();
+        if (entry->channel->SetPeer(peer, type, true, peer, local.addr, epoch) != 0 ||
+            entry->channel->PrepareMode(mode) != 0) {
+            entry->channel->Deinitialize();
+            return -1;
+        }
+        entry->selectedMode = mode;
+        service.gatewayPeers_[slot] = std::move(entry);
+        return 0;
+    }
     std::lock_guard<std::mutex> lock(service.mutex_);
     if (generation != service.status_.generation || service.status_.state == NearlinkIpShareState::STOPPING ||
         (mode != 0 && mode != 1 && mode != 3) ||
@@ -700,11 +934,27 @@ bool NearlinkIpShareService::CanSend(uint16_t lcid, uint8_t tcid, uint8_t pi, ui
 {
     auto &service = GetInstance();
     uint8_t peer[6];
+    uint64_t serverGeneration = 0;
+    NearlinkIpShareChannel *channel = nullptr;
     {
         std::lock_guard<std::mutex> lock(service.mutex_);
-        memcpy(peer, service.peer_, 6);
+        if (service.gatewayAny_) {
+            for (const auto &entry : service.gatewayPeers_) {
+                if (entry != nullptr && entry->epoch == generation && !entry->releasing &&
+                    entry->channel->CanSend(lcid, tcid, pi, generation)) {
+                    memcpy(peer, entry->address.data(), 6);
+                    channel = entry->channel.get();
+                    serverGeneration = service.status_.generation;
+                    break;
+                }
+            }
+        } else {
+            memcpy(peer, service.peer_, 6);
+            channel = &NearlinkIpShareChannel::GetInstance();
+            serverGeneration = generation;
+        }
     }
-    return IsSecure(peer, generation) && NearlinkIpShareChannel::GetInstance().CanSend(lcid, tcid, pi, generation);
+    return channel != nullptr && IsSecure(peer, serverGeneration) && channel->CanSend(lcid, tcid, pi, generation);
 }
 
 int32_t NearlinkIpShareService::QueryNearlinkIpShareCapabilities(const std::string &peerAddress,

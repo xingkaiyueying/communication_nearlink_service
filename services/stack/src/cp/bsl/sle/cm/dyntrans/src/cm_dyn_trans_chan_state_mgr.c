@@ -446,14 +446,14 @@ static uint32_t CM_DynTransChanPassiveReleasedReqHandler(uint8_t curState, const
     return CM_SUCCESS;
 }
 
-static bool CM_DynTransChannelEstablishedCheck(uint16_t srcPort, uint16_t dstPort)
+static bool CM_DynTransChannelEstablishedCheck(uint16_t lcid, uint16_t srcPort, uint16_t dstPort)
 {
     if (g_channelCbks.establishedCheckCbk == NULL) {
         CM_LOGW("establishedCheckCbk is null");
         return true;
     }
 
-    CM_DynTransChanEstablishedCheckParam_S param = { .srcPort = srcPort, .dstPort = dstPort };
+    CM_DynTransChanEstablishedCheckParam_S param = { .lcid = lcid, .srcPort = srcPort, .dstPort = dstPort };
     return g_channelCbks.establishedCheckCbk(&param);
 }
 
@@ -489,7 +489,7 @@ static uint32_t CM_DynTransChanPassiveEstablishedReqHandler(uint8_t curState, co
         CM_DynTransChanSendEstablishedErrResp(param, CM_RESULT_UNSUPPORTED_MTU_SIZE);
         return CM_FAIL;
     }
-    if (!CM_DynTransChannelEstablishedCheck(param->srcPort, param->dstPort)) {
+    if (!CM_DynTransChannelEstablishedCheck(param->lcid, param->srcPort, param->dstPort)) {
         CM_LOGW("established req check failed, srcPort: 0x%04x, dstPort: 0x%04x", param->srcPort, param->dstPort);
         CM_DynTransChanSendEstablishedErrResp(param, CM_RESULT_INSUFFICIENT_RESOURCE);
         return CM_FAIL;

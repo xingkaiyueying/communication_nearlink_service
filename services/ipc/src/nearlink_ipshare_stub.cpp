@@ -30,6 +30,8 @@ NearlinkIpShareStub::NearlinkIpShareStub()
         {NL_IPSHARE_UPDATE_VALIDATED_ADDRESS, {UpdateValidatedAddressInner, permission}},
         {NL_IPSHARE_IS_PEER_SUPPORTED, {IsPeerSupportedInner, permission}},
         {NL_IPSHARE_START_GATEWAY, {StartGatewayInner, permission}},
+        {NL_IPSHARE_START_GATEWAY_ANY, {StartGatewayAnyInner, permission}},
+        {NL_IPSHARE_SUPPORTED_MAX_TERMINALS, {GetSupportedMaxTerminalsInner, permission}},
         {NL_IPSHARE_START_TERMINAL, {StartTerminalInner, permission}},
         {NL_IPSHARE_STOP, {StopInner, permission}},
         {NL_IPSHARE_GET_STATUS, {GetStatusInner, permission}},
@@ -67,6 +69,23 @@ int32_t NearlinkIpShareStub::IsPeerSupportedInner(NearlinkIpShareStub *stub, Mes
     }
     HILOGI("[IpShare][IPC] support request handled ret=%{public}d supported=%{public}d", ret, supported);
     return NO_ERROR;
+}
+
+int32_t NearlinkIpShareStub::StartGatewayAnyInner(NearlinkIpShareStub *stub,
+    MessageParcel &data, MessageParcel &reply)
+{
+    int32_t mode = 0, maxTerminals = 0;
+    if (data.GetReadableBytes() != 2 * sizeof(int32_t) || !data.ReadInt32(mode) ||
+        !data.ReadInt32(maxTerminals) || data.GetReadableBytes() != 0 ||
+        !IsIpShareMode(mode) || maxTerminals < 1 || maxTerminals > 32) return TRANSACTION_ERR;
+    return reply.WriteInt32(stub->StartGatewayAny(mode, maxTerminals)) ? NO_ERROR : TRANSACTION_ERR;
+}
+
+int32_t NearlinkIpShareStub::GetSupportedMaxTerminalsInner(NearlinkIpShareStub *stub,
+    MessageParcel &data, MessageParcel &reply)
+{
+    if (data.GetReadableBytes() != 0) return TRANSACTION_ERR;
+    return reply.WriteInt32(stub->GetSupportedMaxTerminals()) ? NO_ERROR : TRANSACTION_ERR;
 }
 
 int32_t NearlinkIpShareStub::StartGatewayInner(NearlinkIpShareStub *stub, MessageParcel &data,

@@ -775,7 +775,11 @@ static bool QOSM_TransChannEstablishedCheckCbk(const CM_DynTransChanEstablishedC
     if (g_transChannelCbks.establishedCheck == NULL) {
         return true;
     }
-    return g_transChannelCbks.establishedCheck(param->srcPort);
+    CM_LogicLink_S link = { 0 };
+    if (CM_GetLogicLinkByLcid(param->lcid, &link) != CM_SUCCESS) {
+        return g_transChannelCbks.establishedCheck(NULL, param->srcPort);
+    }
+    return g_transChannelCbks.establishedCheck(&link.addr, param->srcPort);
 }
 
 static uint32_t QOSM_DynTransChanCbksReg(void)

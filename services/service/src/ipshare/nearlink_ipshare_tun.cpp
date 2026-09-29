@@ -14,6 +14,7 @@
  */
 #include "nearlink_ipshare_tun.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
@@ -77,12 +78,17 @@ NearlinkIpShareTun::~NearlinkIpShareTun()
     Close();
 }
 
-int32_t NearlinkIpShareTun::Open(const PacketCallback &callback)
+int32_t NearlinkIpShareTun::Open(const PacketCallback &callback, const std::string &ifaceName)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (fd_ >= 0) {
         HILOGI("[IpShare][Tun] open skipped: interface already open");
         return 0;
+    }
+    if (ifaceName.size() <= 5 || ifaceName.size() >= IFNAMSIZ ||
+        ifaceName.compare(0, 5, "sleip") != 0 ||
+        !std::all_of(ifaceName.begin() + 5, ifaceName.end(), [](char ch) { return ch >= '0' && ch <= '9'; })) {
+        return -EINVAL;
     }
     if (!callback) {
         HILOGE("[IpShare][Tun] open failed: packet callback is null");
@@ -95,7 +101,7 @@ int32_t NearlinkIpShareTun::Open(const PacketCallback &callback)
     }
     struct ifreq request = {};
     request.ifr_flags = IFF_TUN | IFF_NO_PI;
-    (void)strncpy(request.ifr_name, IP_SHARE_IFACE, IFNAMSIZ - 1);
+    (void)strncpy(request.ifr_name, ifaceName.c_str(), IFNAMSIZ - 1);
     if (ioctl(fd, TUNSETIFF, &request) < 0) {
         int error = errno;
         (void)close(fd);
@@ -108,10 +114,11 @@ int32_t NearlinkIpShareTun::Open(const PacketCallback &callback)
         return upRet;
     }
     callback_ = callback;
+    ifaceName_ = ifaceName;
     fd_ = fd;
     running_.store(true);
     reader_ = std::thread(&NearlinkIpShareTun::ReadLoop, this);
-    HILOGI("[IpShare][Tun] interface opened name=%{public}s flags=IFF_TUN|IFF_NO_PI", IP_SHARE_IFACE);
+    HILOGI("[IpShare][Tun] interface opened name=%{public}s flags=IFF_TUN|IFF_NO_PI", ifaceName.c_str());
     return 0;
 }
 

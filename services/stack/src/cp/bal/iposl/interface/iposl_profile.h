@@ -32,6 +32,7 @@ extern "C" {
 #define IPOSL_NODE_CONFIG_METHOD_UUID "7aa3120e-f0d2-4560-b711-a5b618b7a32b"
 
 #define IPOSL_IP_TYPE_IPV4 0x01u
+#define IPOSL_IP_TYPE_DUAL_STACK 0x03u
 #define IPOSL_OPCODE_CONFIGURE 0x01u
 #define IPOSL_OPCODE_ENABLE 0x02u
 #define IPOSL_MTU 1500u
@@ -46,20 +47,35 @@ enum {
 };
 
 typedef struct IposlProfileCallbacks {
-    void (*onPeerSupported)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], bool supported, int32_t error);
-    void (*onConfigured)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], bool opened, int32_t error);
+    void (*onPeerSupported)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], bool supported, int32_t error, uint8_t peerModes, bool known, uint64_t generation);
+    void (*onConfigured)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], bool opened, int32_t error, uint8_t mode, uint64_t generation);
+    /* Synchronous resource admission on CP, before a successful wire response. mode=0 rolls back. */
+    int32_t (*prepareMode)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t mode, uint64_t generation);
+    bool (*isSecure)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint64_t generation);
+    bool (*canSend)(uint16_t lcid, uint8_t tcid, uint8_t pi, uint64_t generation);
+    /* Terminal-only result of reading the gateway's complete mode bitmap. */
+    void (*onPeerCapabilities)(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t peerModes, uint64_t generation);
 } IposlProfileCallbacks;
 
 int32_t IposlProfileInit(const IposlProfileCallbacks *callbacks);
 void IposlProfileDeinit(void);
-int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType);
+int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation);
 void IposlProfileStopServer(void);
-int32_t IposlProfileProbePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType);
+int32_t IposlProfileProbePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation);
 int32_t IposlProfileStartTerminal(const uint8_t gateway[IPOSL_LAYER2_ID_LEN], uint8_t addressType,
-    const uint8_t localLayer2[IPOSL_LAYER2_ID_LEN]);
+    const uint8_t localLayer2[IPOSL_LAYER2_ID_LEN], uint8_t mode, uint64_t generation);
 void IposlProfileStopClient(void);
 /* Called from the TUN thread; copies data and serializes DTAP access on CP. */
 int32_t IposlProfileSendIpv4(uint16_t lcid, uint8_t tcid, const uint8_t *data, uint16_t length);
+int32_t IposlProfileSendIp(uint16_t lcid, uint8_t tcid, uint8_t pi, const uint8_t *data,
+    uint16_t length, uint64_t generation);
+void IposlCodecS1LinkLocal(const uint8_t layer2[6], uint8_t address[16]);
+bool IposlCodecValidatePacket(uint8_t pi, const uint8_t *data, size_t length);
+int32_t IposlCodecEncodeConfigMode(const uint8_t layer2[IPOSL_LAYER2_ID_LEN], uint8_t mode,
+    uint8_t *out, size_t outLen);
+bool IposlCodecGatewayModes(const uint8_t *data, size_t length, uint8_t *modes);
+uint8_t IposlCodecSelectMode(uint8_t requested, uint8_t peerModes);
+bool IposlCodecMayFallback(uint8_t opcode, uint8_t mode, uint8_t result, bool alreadyRetried, bool secure);
 uint16_t IposlProfileIdentityServiceMemberCount(void);
 uint8_t IposlProfileDataProtocolIndicator(void);
 

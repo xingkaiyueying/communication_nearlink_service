@@ -18,6 +18,7 @@ ohos_executable("sleip_nearlink_stage1") {
   ]
   sources = [ "$target_gen_dir/sleip_nearlink_stage1.cpp" ]
   include_dirs = [
+    "$NEARLINK_ROOT/test/mytest",
     "$NEARLINK_ROOT/services/stack/src/cp/bal/iposl/interface",
     "$NEARLINK_ROOT/interfaces/inner_api/include",
   ]

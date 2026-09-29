@@ -44,6 +44,10 @@ private:
     static int32_t RegisterObserverInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
     static int32_t UnregisterObserverInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
 
+    static int32_t QueryNearlinkIpShareCapabilitiesInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
+    static int32_t StartNearlinkGatewayWithModeInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
+    static int32_t StartNearlinkTerminalWithModeInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
+    static int32_t UpdateValidatedAddressInner(NearlinkIpShareStub *, MessageParcel &, MessageParcel &);
     std::map<uint32_t, HandlerWithPermission> memberFuncMap_;
 };
 

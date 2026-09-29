@@ -36,6 +36,11 @@ public:
     virtual int32_t GetStatus(NearlinkIpShareStatus &status) = 0;
     virtual int32_t RegisterObserver(const sptr<INearlinkIpShareObserver> &observer) = 0;
     virtual int32_t UnregisterObserver() = 0;
+    virtual int32_t QueryNearlinkIpShareCapabilities(const std::string &peerAddress, NearlinkIpShareCapabilities &capabilities) = 0;
+    virtual int32_t StartNearlinkGatewayWithMode(const std::string &peerAddress, int32_t mode) = 0;
+    virtual int32_t StartNearlinkTerminalWithMode(const std::string &peerAddress, int32_t mode) = 0;
+
+    virtual int32_t UpdateValidatedAddress(const NearlinkIpShareAddressEvidence &address) = 0;
 };
 
 }  // namespace OHOS::Nearlink

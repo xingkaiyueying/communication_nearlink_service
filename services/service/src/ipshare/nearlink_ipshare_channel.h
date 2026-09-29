@@ -16,12 +16,15 @@
 #define NEARLINK_IPSHARE_CHANNEL_H
 
 #include <chrono>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 
 #include "dtap.h"
 #include "nearlink_ipshare_tun.h"
+#include "nearlink_ipshare_ipv6.h"
+#include "nearlink_ipshare_status.h"
 #include "qosm_trans_channel.h"
 
 namespace OHOS::Nearlink {
@@ -39,7 +42,14 @@ public:
     int32_t Open(const uint8_t peer[6], uint8_t addressType);
     void Close();
     int32_t SetPeer(const uint8_t peer[6], uint8_t addressType, bool gateway = true,
-                    const uint8_t *clientKey = nullptr);
+                    const uint8_t *clientKey = nullptr, const uint8_t *localLayer2 = nullptr, uint64_t generation = 0);
+    int32_t PrepareMode(uint8_t mode);
+    bool IsDrained();
+    int32_t UpdateValidatedAddress(const NearlinkIpShareAddressEvidence &address);
+    int32_t ResetBinding(uint64_t generation);
+    int32_t EnableMode(uint8_t mode);
+    bool CanSend(uint16_t lcid, uint8_t tcid, uint8_t pi, uint64_t generation);
+    static int OnIpv6Received(DTAP_Data_Info_S *info, SDF_Buff_S *buffer);
     bool IsCurrentGeneration(uint64_t generation);
 
     static bool IsIpSharePort(uint16_t port);
@@ -76,6 +86,8 @@ private:
     bool ObserveDhcp(const uint8_t *data, uint16_t length, uint64_t generation);
     bool AuthorizePacket(const uint8_t *data, uint16_t length, uint64_t generation, bool received);
     bool gateway_{true};
+    NearlinkIpShareIpv6 ipv6_;
+    uint64_t addressSequence_{0};
     uint8_t clientKey_[6]{};
     bool dhcpDiscover_{false};
     std::chrono::steady_clock::time_point transactionExpiry_{};
@@ -92,6 +104,10 @@ private:
     NearlinkIpShareTun tun_;
     StateCallback callback_;
     uint8_t peer_[6]{};
+    uint8_t localLayer2_[6]{};
+    uint8_t mode_{0};
+    bool enabled_{false};
+    std::atomic<uint64_t> rx4_{0}, rx6_{0}, tx4_{0}, tx6_{0}, rejected_{0};
     uint8_t addressType_{0};
     uint16_t lcid_{0};
     uint8_t tcid_{0};

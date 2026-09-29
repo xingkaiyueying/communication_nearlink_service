@@ -17,6 +17,10 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <arpa/inet.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <poll.h>
@@ -41,6 +45,12 @@ int32_t SetInterfaceUp(const char *ifname)
     }
     struct ifreq request = {};
     (void)strncpy(request.ifr_name, ifname, IFNAMSIZ - 1);
+    request.ifr_mtu = IP_SHARE_PACKET_MAX;
+    if (ioctl(socketFd, SIOCSIFMTU, &request) < 0) {
+        int error = errno;
+        (void)close(socketFd);
+        return -error;
+    }
     if (ioctl(socketFd, SIOCGIFFLAGS, &request) < 0) {
         int error = errno;
         (void)close(socketFd);
@@ -153,9 +163,33 @@ bool NearlinkIpShareTun::IsOpen() const
     return fd_ >= 0;
 }
 
+bool NearlinkIpShareTun::IsIpv6AddressUsable(const uint8_t address[16])
+{
+    std::ostringstream expected;
+    for (size_t i = 0; i < 16; ++i) expected << std::hex << std::setfill('0') << std::setw(2) << unsigned(address[i]);
+    std::ifstream input("/proc/net/if_inet6");
+    std::string text, iface;
+    unsigned index, prefix, scope, flags;
+    while (input >> text >> std::hex >> index >> prefix >> scope >> flags >> iface) {
+        // IFA_F_TENTATIVE, IFA_F_DADFAILED and optimistic addresses cannot originate business traffic.
+        if (iface == IP_SHARE_IFACE && text == expected.str()) return (flags & (0x40 | 0x08 | 0x04)) == 0;
+    }
+    return false;
+}
+
+bool NearlinkIpShareTun::ParseIpv6Evidence(const std::string &text, uint32_t index, uint8_t address[16])
+{
+    if (inet_pton(AF_INET6, text.c_str(), address) != 1) return false;
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return false;
+    ifreq request{}; strncpy(request.ifr_name, IP_SHARE_IFACE, IFNAMSIZ - 1);
+    bool valid = ioctl(fd, SIOCGIFINDEX, &request) == 0 && static_cast<uint32_t>(request.ifr_ifindex) == index;
+    close(fd); return valid;
+}
+
 void NearlinkIpShareTun::ReadLoop()
 {
-    uint8_t packet[IP_SHARE_PACKET_MAX] = {0};
+    uint8_t packet[IP_SHARE_PACKET_MAX + 1] = {0};
     HILOGI("[IpShare][Tun] read loop started");
     while (running_.load()) {
         int fd = -1;
@@ -178,7 +212,7 @@ void NearlinkIpShareTun::ReadLoop()
             continue;
         }
         ssize_t length = read(fd, packet, sizeof(packet));
-        if (length > 0 && callback) {
+        if (length > 0 && length <= static_cast<ssize_t>(IP_SHARE_PACKET_MAX) && callback) {
 
             callback(packet, static_cast<uint16_t>(length));
         } else if (length < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {

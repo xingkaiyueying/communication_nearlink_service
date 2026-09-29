@@ -125,7 +125,7 @@ int32_t NearlinkIpShareProxy::GetStatus(NearlinkIpShareStatus &status)
         return NL_ERR_IPC_TRANS_FAILED;
     }
     status = *result;
-    HILOGI("[IpShare][IPC] status completed role=%{public}d state=%{public}d error=%{public}d",
+    HILOGD("[IpShare][IPC] status completed role=%{public}d state=%{public}d error=%{public}d",
         static_cast<int32_t>(status.role), static_cast<int32_t>(status.state), status.errorCode);
     return NL_NO_ERROR;
 }
@@ -160,6 +160,55 @@ int32_t NearlinkIpShareProxy::UnregisterObserver()
     ret = ret == NL_NO_ERROR ? reply.ReadInt32() : ret;
     HILOGI("[IpShare][IPC] observer unregistration completed ret=%{public}d", ret);
     return ret;
+}
+
+int32_t NearlinkIpShareProxy::QueryNearlinkIpShareCapabilities(const std::string &peerAddress, NearlinkIpShareCapabilities &capabilities)
+{
+    MessageParcel data, reply;
+    if (peerAddress.size() != 17) return NL_ERR_INVALID_PARAM;
+    if (!data.WriteInterfaceToken(GetDescriptor()) || !data.WriteString(peerAddress))
+        return NL_ERR_IPC_TRANS_FAILED;
+    int32_t ret = Transact(NL_IPSHARE_QUERY_CAPABILITIES, data, reply);
+    if (ret != NL_NO_ERROR) return ret;
+    if (!reply.ReadInt32(ret)) return NL_ERR_IPC_TRANS_FAILED;
+    if (ret != 0) return ret;
+    std::unique_ptr<NearlinkIpShareCapabilities> value(reply.ReadParcelable<NearlinkIpShareCapabilities>());
+    if (!value) return NL_ERR_IPC_TRANS_FAILED;
+    capabilities = *value;
+    return ret;
+}
+
+int32_t NearlinkIpShareProxy::StartNearlinkGatewayWithMode(const std::string &peerAddress, int32_t mode)
+{
+    MessageParcel data, reply;
+    if (peerAddress.size() != 17 || !IsIpShareMode(mode)) return NL_ERR_INVALID_PARAM;
+    if (!data.WriteInterfaceToken(GetDescriptor()) || !data.WriteString(peerAddress) || !data.WriteInt32(mode))
+        return NL_ERR_IPC_TRANS_FAILED;
+    int32_t ret = Transact(NL_IPSHARE_START_GATEWAY_WITH_MODE, data, reply);
+    if (ret != NL_NO_ERROR) return ret;
+    if (!reply.ReadInt32(ret)) return NL_ERR_IPC_TRANS_FAILED;
+    return ret;
+}
+
+int32_t NearlinkIpShareProxy::StartNearlinkTerminalWithMode(const std::string &peerAddress, int32_t mode)
+{
+    MessageParcel data, reply;
+    if (peerAddress.size() != 17 || !IsIpShareMode(mode)) return NL_ERR_INVALID_PARAM;
+    if (!data.WriteInterfaceToken(GetDescriptor()) || !data.WriteString(peerAddress) || !data.WriteInt32(mode))
+        return NL_ERR_IPC_TRANS_FAILED;
+    int32_t ret = Transact(NL_IPSHARE_START_TERMINAL_WITH_MODE, data, reply);
+    if (ret != NL_NO_ERROR) return ret;
+    if (!reply.ReadInt32(ret)) return NL_ERR_IPC_TRANS_FAILED;
+    return ret;
+}
+
+int32_t NearlinkIpShareProxy::UpdateValidatedAddress(const NearlinkIpShareAddressEvidence &address)
+{
+    MessageParcel data, reply;
+    if (!data.WriteInterfaceToken(GetDescriptor()) || !address.Write(data)) return NL_ERR_IPC_TRANS_FAILED;
+    int32_t ret = Transact(NL_IPSHARE_UPDATE_VALIDATED_ADDRESS, data, reply);
+    if (ret != 0) return ret;
+    return reply.ReadInt32(ret) ? ret : NL_ERR_IPC_TRANS_FAILED;
 }
 
 }  // namespace OHOS::Nearlink

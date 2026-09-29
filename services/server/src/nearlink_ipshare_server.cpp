@@ -53,7 +53,7 @@ int32_t NearlinkIpShareServer::GetStatus(NearlinkIpShareStatus &status)
     if (ret != 0) {
         HILOGE("[IpShare][Server] status failed ret=%{public}d", ret);
     } else {
-        HILOGI("[IpShare][Server] status ret=0 role=%{public}d state=%{public}d error=%{public}d",
+        HILOGD("[IpShare][Server] status ret=0 role=%{public}d state=%{public}d error=%{public}d",
             static_cast<int32_t>(status.role), static_cast<int32_t>(status.state), status.errorCode);
     }
     return ret;
@@ -71,6 +71,26 @@ int32_t NearlinkIpShareServer::UnregisterObserver()
     int32_t ret = NearlinkIpShareService::GetInstance().UnregisterObserver();
     HILOGI("[IpShare][Server] observer unregistration ret=%{public}d", ret);
     return ret;
+}
+
+int32_t NearlinkIpShareServer::QueryNearlinkIpShareCapabilities(const std::string &peerAddress, NearlinkIpShareCapabilities &capabilities)
+{
+    return NearlinkIpShareService::GetInstance().QueryNearlinkIpShareCapabilities(peerAddress, capabilities);
+}
+
+int32_t NearlinkIpShareServer::StartNearlinkGatewayWithMode(const std::string &peerAddress, int32_t mode)
+{
+    return NearlinkIpShareService::GetInstance().StartNearlinkGatewayWithMode(peerAddress, mode);
+}
+
+int32_t NearlinkIpShareServer::StartNearlinkTerminalWithMode(const std::string &peerAddress, int32_t mode)
+{
+    return NearlinkIpShareService::GetInstance().StartNearlinkTerminalWithMode(peerAddress, mode);
+}
+
+int32_t NearlinkIpShareServer::UpdateValidatedAddress(const NearlinkIpShareAddressEvidence &address)
+{
+    return NearlinkIpShareService::GetInstance().UpdateValidatedAddress(address);
 }
 
 }  // namespace OHOS::Nearlink

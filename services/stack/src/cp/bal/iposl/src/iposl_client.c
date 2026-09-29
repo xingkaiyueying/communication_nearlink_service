@@ -35,6 +35,13 @@ static const uint8_t g_gatewayCapabilityUuid[16] = {
     0x2E, 0x68, 0xC5, 0x66, 0xE3, 0x14, 0x46, 0x6D, 0x96, 0x29, 0x40, 0x2F, 0x16, 0xCA, 0xB2, 0x19
 };
 static bool g_identifierFound;
+static uint8_t g_requestedMode;
+static uint8_t g_selectedMode;
+static uint8_t g_peerModes;
+static bool g_capabilityKnown;
+static bool g_retried;
+static bool g_opened;
+static uint64_t g_generation;
 static uint16_t g_capabilityHandle;
 
 static int32_t g_clientAppId = SSAP_APP_INVALID_ID;
@@ -55,7 +62,7 @@ static void NotifySupported(bool supported, int32_t error)
     const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
     if (callbacks != NULL && callbacks->onPeerSupported != NULL) {
         NLSTK_LOG_INFO("[IpShare][IPoSL][Client] support callback supported=%d error=%d", supported, error);
-        callbacks->onPeerSupported(g_peer, supported, error);
+        callbacks->onPeerSupported(g_peer, supported, error, g_peerModes, g_capabilityKnown, g_generation);
     } else {
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Client] support callback dropped: callback unavailable");
     }
@@ -66,7 +73,7 @@ static void NotifyConfigured(bool opened, int32_t error)
     const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
     if (callbacks != NULL && callbacks->onConfigured != NULL) {
         NLSTK_LOG_INFO("[IpShare][IPoSL][Client] configuration callback opened=%d error=%d", opened, error);
-        callbacks->onConfigured(g_peer, opened, error);
+        callbacks->onConfigured(g_peer, opened, error, g_selectedMode, g_generation);
     } else {
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Client] configuration callback dropped: callback unavailable");
     }
@@ -104,9 +111,11 @@ static void FinishDisconnected(void)
 
 static int32_t SendRequest(uint8_t opcode)
 {
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    if (callbacks == NULL || !callbacks->isSecure(g_peer, g_generation)) return IPOSL_ERR_INVALID_STATE;
     uint8_t data[IPOSL_CONFIG_REQUEST_LEN] = {0};
     int32_t len = opcode == IPOSL_OPCODE_CONFIGURE ?
-        IposlCodecEncodeConfigRequest(g_localLayer2, data, sizeof(data)) :
+        IposlCodecEncodeConfigMode(g_localLayer2, g_selectedMode, data, sizeof(data)) :
         IposlCodecEncodeOpenRequest(g_localLayer2, data, sizeof(data));
     if (len <= 0) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Client] request encode failed opcode=%u ret=%d", opcode, len);
@@ -127,15 +136,36 @@ static int32_t SendRequest(uint8_t opcode)
 
 static void OnCallMethod(int32_t appId, NLSTK_SsapClientCallMethodResult_S *response, NLSTK_Errcode_E ret)
 {
-    if (appId != g_clientAppId) return;
+    if (appId != g_clientAppId || g_opened) return;
     uint8_t layer2[IPOSL_LAYER2_ID_LEN] = {0};
     uint8_t result = 0xFF;
     int32_t responseError = response == NULL ? IPOSL_ERR_INVALID_PARAM : response->errorCode;
     int32_t decodeRet = response == NULL ? IPOSL_ERR_INVALID_PARAM :
         IposlCodecDecodeResponse(response->value.data, response->value.len, g_expectedOpcode, layer2, &result);
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    bool validResponse = response != NULL && ret == NLSTK_ERRCODE_SUCCESS &&
+        responseError == NLSTK_ERRCODE_SUCCESS && decodeRet == IPOSL_SUCCESS &&
+        memcmp(layer2, g_localLayer2, sizeof(layer2)) == 0;
+    if (validResponse && callbacks != NULL && IposlCodecMayFallback(g_expectedOpcode, g_selectedMode,
+        result, g_retried, callbacks->isSecure(g_peer, g_generation))) {
+        g_retried = true;
+        g_expectedOpcode = 0;
+        /* A rejected configure has no channel. Release both local reservations before retrying. */
+        if (callbacks->prepareMode(g_peer, 0, g_generation) == 0 &&
+            callbacks->prepareMode(g_peer, IPOSL_IP_TYPE_IPV4, g_generation) == 0) {
+            g_selectedMode = IPOSL_IP_TYPE_IPV4;
+            NLSTK_LOG_INFO("[IpShare][IPoSL] dual configure rejected result=%u; single IPv4 retry", result);
+            if (SendRequest(IPOSL_OPCODE_CONFIGURE) == 0) return;
+        }
+        NotifyConfigured(false, IPOSL_ERR_INVALID_STATE);
+        Finish(false);
+        return;
+    }
+
     if (appId != g_clientAppId || response == NULL || ret != NLSTK_ERRCODE_SUCCESS ||
         responseError != NLSTK_ERRCODE_SUCCESS || decodeRet != IPOSL_SUCCESS ||
-        memcmp(layer2, g_localLayer2, sizeof(layer2)) != 0 || result != 0) {
+        memcmp(layer2, g_localLayer2, sizeof(layer2)) != 0 || result != 0 ||
+        callbacks == NULL || !callbacks->isSecure(g_peer, g_generation)) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Client] method response rejected appId=%d expectedAppId=%d ret=%d "
             "responseError=%d decodeRet=%d opcode=%u result=%u", appId, g_clientAppId, ret, responseError,
             decodeRet, g_expectedOpcode, result);
@@ -153,40 +183,30 @@ static void OnCallMethod(int32_t appId, NLSTK_SsapClientCallMethodResult_S *resp
         return;
     }
     NLSTK_LOG_INFO("[IpShare][IPoSL][Client] enable response accepted");
+    g_opened = true;
     NotifyConfigured(true, IPOSL_SUCCESS);
-}
-
-static bool SupportsGatewayIpv4(const uint8_t *data, uint16_t length)
-{
-    if (data == NULL || length < 3 || (((uint16_t)data[1] << 8) | data[2]) != length - 3) return false;
-    /* The node identifier is opaque. Table 9 fields may be reordered and advertise extra supported bits. */
-    uint8_t seen = 0, nat = 0, communication = 0, ip = 0;
-    uint16_t mtu = 0;
-    for (uint16_t offset = 3; offset < length;) {
-        uint8_t type = data[offset++];
-        if (type < 1 || type > 4 || (seen & (1u << type)) != 0) return false;
-        uint16_t size = type == 2 ? 2 : 1;
-        if (length - offset < size) return false;
-        seen |= 1u << type;
-        if (type == 1) nat = data[offset];
-        if (type == 2) mtu = ((uint16_t)data[offset] << 8) | data[offset + 1];
-        if (type == 3) communication = data[offset];
-        if (type == 4) ip = data[offset];
-        offset += size;
-    }
-    return seen == 0x1e && (nat & 2) != 0 && mtu >= IPOSL_MTU &&
-        (communication & 1) != 0 && (ip & IPOSL_IP_TYPE_IPV4) != 0;
 }
 
 static void OnReadCapability(int32_t appId, NLSTK_SsapClientReadPropertyInfo_S *property,
     NLSTK_Errcode_E ret)
 {
     if (appId != g_clientAppId) return;
-    // Select the supported IPv4/unicast/NAPT baseline from structured capabilities.
-    if (ret != NLSTK_ERRCODE_SUCCESS || property == NULL || property->handle != g_capabilityHandle ||
-        property->errorCode != NLSTK_ERRCODE_SUCCESS || property->value.data == NULL ||
-        !SupportsGatewayIpv4(property->value.data, property->value.len) ||
-        SendRequest(IPOSL_OPCODE_CONFIGURE) != IPOSL_SUCCESS) {
+    g_capabilityKnown = ret == NLSTK_ERRCODE_SUCCESS && property != NULL &&
+        property->handle == g_capabilityHandle && property->errorCode == NLSTK_ERRCODE_SUCCESS &&
+        IposlCodecGatewayModes(property->value.data, property->value.len, &g_peerModes);
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    if (g_terminal && g_capabilityKnown && callbacks != NULL && callbacks->onPeerCapabilities != NULL) {
+        callbacks->onPeerCapabilities(g_peer, g_peerModes, g_generation);
+    }
+    if (!g_terminal) {
+        NotifySupported(g_identifierFound, IPOSL_SUCCESS);
+        Finish(false);
+        return;
+    }
+    g_selectedMode = g_capabilityKnown ? IposlCodecSelectMode(g_requestedMode, g_peerModes) : 0;
+    if (g_selectedMode == 0 || callbacks == NULL ||
+        callbacks->prepareMode(g_peer, g_selectedMode, g_generation) != 0 ||
+        SendRequest(IPOSL_OPCODE_CONFIGURE) != 0) {
         NotifyConfigured(false, IPOSL_ERR_NOT_SUPPORTED);
         Finish(false);
     }
@@ -195,7 +215,7 @@ static void OnReadCapability(int32_t appId, NLSTK_SsapClientReadPropertyInfo_S *
 static void OnGetServices(int32_t appId, NLSTK_SsapUuid_S *uuid, NLSTK_SsapServ_S *services,
     uint16_t serviceNum, NLSTK_SsapClientFreeFunc freeFunc)
 {
-    const uint8_t *expectedUuid = g_terminal && g_identifierFound ? g_configUuid : g_identifierUuid;
+    const uint8_t *expectedUuid = g_identifierFound ? g_configUuid : g_identifierUuid;
     if (appId != g_clientAppId) {
         NLSTK_LOG_WARN("[IpShare][IPoSL][Client] get services callback ignored appId=%d expectedAppId=%d", appId,
             g_clientAppId);
@@ -214,17 +234,8 @@ static void OnGetServices(int32_t appId, NLSTK_SsapUuid_S *uuid, NLSTK_SsapServ_
         if (g_terminal) {
             NotifyConfigured(false, IPOSL_ERR_NOT_SUPPORTED);
         } else {
-            NotifySupported(false, IPOSL_SUCCESS);
+            NotifySupported(g_identifierFound, IPOSL_SUCCESS);
         }
-        Finish(false);
-        return;
-    }
-    if (!g_terminal) {
-        if (freeFunc != NULL && services != NULL) {
-            freeFunc(services, serviceNum);
-        }
-        NotifySupported(true, IPOSL_SUCCESS);
-        NLSTK_LOG_INFO("[IpShare][IPoSL][Client] support service discovered count=%u", serviceNum);
         Finish(false);
         return;
     }
@@ -235,7 +246,8 @@ static void OnGetServices(int32_t appId, NLSTK_SsapUuid_S *uuid, NLSTK_SsapServ_
         SetUuid(&configUuid, g_configUuid);
         if (NLSTK_SsapClientDiscoverServicesByUuid(appId, &configUuid, SSAP_START_HANDLE,
             SSAP_END_HANDLE, FIND_STRUCTURE_TYPE_PRIMARY_SERVICE) != NLSTK_ERRCODE_SUCCESS) {
-            NotifyConfigured(false, IPOSL_ERR_NOT_SUPPORTED);
+            if (g_terminal) NotifyConfigured(false, IPOSL_ERR_NOT_SUPPORTED);
+            else NotifySupported(true, IPOSL_SUCCESS);
             Finish(false);
         }
         return;
@@ -264,7 +276,8 @@ static void OnGetServices(int32_t appId, NLSTK_SsapUuid_S *uuid, NLSTK_SsapServ_
     if (g_methodHandle == 0 || g_capabilityHandle == 0 ||
         NLSTK_SsapClientReadProperty(appId, g_capabilityHandle) != NLSTK_ERRCODE_SUCCESS) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Client] terminal configuration unavailable methodHandle=%u", g_methodHandle);
-        NotifyConfigured(false, IPOSL_ERR_NOT_SUPPORTED);
+        if (g_terminal) NotifyConfigured(false, IPOSL_ERR_NOT_SUPPORTED);
+        else NotifySupported(g_identifierFound, IPOSL_SUCCESS);
         Finish(false);
     } else {
         NLSTK_LOG_INFO("[IpShare][IPoSL][Client] terminal configuration method discovered handle=%u", g_methodHandle);
@@ -280,7 +293,7 @@ static void OnFindServiceByUuid(int32_t appId, NLSTK_SsapUuid_S *uuid, NLSTK_Err
         if (g_terminal) {
             NotifyConfigured(false, IPOSL_ERR_NOT_SUPPORTED);
         } else {
-            NotifySupported(false, IPOSL_SUCCESS);
+            NotifySupported(g_identifierFound, IPOSL_SUCCESS);
         }
         Finish(false);
         return;
@@ -312,7 +325,7 @@ static void OnConnectionStateChanged(int32_t appId, uint8_t state, NLSTK_Errcode
         appId, state, ret, reason, g_terminal);
     if (state == SSAP_CONNECT_STATE_CONNECTED && ret == NLSTK_ERRCODE_SUCCESS) {
         NLSTK_SsapUuid_S uuid = {0};
-        SetUuid(&uuid, g_terminal && g_identifierFound ? g_configUuid : g_identifierUuid);
+        SetUuid(&uuid, g_identifierFound ? g_configUuid : g_identifierUuid);
         /* The stack derives standard/vendor UUID encoding from uuid; this argument is a find-structure type. */
         NLSTK_Errcode_E discoverRet = NLSTK_SsapClientDiscoverServicesByUuid(appId, &uuid, SSAP_START_HANDLE,
             SSAP_END_HANDLE, FIND_STRUCTURE_TYPE_PRIMARY_SERVICE);
@@ -341,7 +354,7 @@ static void OnConnectionStateChanged(int32_t appId, uint8_t state, NLSTK_Errcode
 }
 
 int32_t IposlClientStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, bool terminal,
-    const uint8_t localLayer2[IPOSL_LAYER2_ID_LEN])
+    const uint8_t localLayer2[IPOSL_LAYER2_ID_LEN], uint8_t mode, uint64_t generation)
 {
     if (peer == NULL || (terminal && localLayer2 == NULL) || g_clientAppId != SSAP_APP_INVALID_ID) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Client] start rejected peerNull=%d localNull=%d activeAppId=%d", peer == NULL,
@@ -368,6 +381,13 @@ int32_t IposlClientStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addres
     if (terminal) {
         (void)memcpy(g_localLayer2, localLayer2, sizeof(g_localLayer2));
     }
+    g_requestedMode = mode;
+    g_selectedMode = 0;
+    g_peerModes = 0;
+    g_capabilityKnown = false;
+    g_retried = false;
+    g_opened = false;
+    g_generation = generation;
     g_identifierFound = false;
     g_capabilityHandle = 0;
     g_terminal = terminal;
@@ -392,6 +412,7 @@ void IposlClientStop(void)
     (void)memset(g_peer, 0, sizeof(g_peer));
     (void)memset(g_localLayer2, 0, sizeof(g_localLayer2));
     g_terminal = false;
+    g_generation = 0;
     g_methodHandle = 0;
     g_expectedOpcode = 0;
     NLSTK_LOG_INFO("[IpShare][IPoSL][Client] stop completed");

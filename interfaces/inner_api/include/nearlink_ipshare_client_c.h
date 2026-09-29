@@ -35,7 +35,34 @@ typedef struct NlIpShareStatusC {
     int32_t hasUpstream;
     char errorStage[NL_IPSHARE_ERROR_STAGE_LEN];
     int32_t errorCode;
+    char contextId[65];
+    uint64_t generation;
+    uint64_t sequence;
+    int32_t requestedMode;
+    int32_t selectedMode;
+    int32_t serviceReady;
 } NlIpShareStatusC;
+
+typedef struct NlIpShareCapabilitiesC {
+    int32_t identifierPresent;
+    int32_t discoveryState;
+    int32_t localModes[2];
+    int32_t localModeCount;
+    int32_t peerModes[2];
+    int32_t peerModeCount;
+    int32_t peerCapabilityKnown;
+} NlIpShareCapabilitiesC;
+
+typedef struct NlIpShareIpv6AddressC {
+    uint64_t generation, sequence;
+    char address[46];
+    uint32_t ifindex, prefixLength, flags, preferredLifetime, validLifetime;
+} NlIpShareIpv6AddressC;
+int32_t NlIpShareUpdateValidatedAddress(const NlIpShareIpv6AddressC *address);
+
+int32_t NlIpShareQueryCapabilities(const char *peerAddress, NlIpShareCapabilitiesC *capabilities);
+int32_t NlIpShareStartGatewayWithMode(const char *peerAddress, int32_t mode);
+int32_t NlIpShareStartTerminalWithMode(const char *peerAddress, int32_t mode);
 
 int32_t NlIpShareIsPeerSupported(const char *peerAddress, int32_t *supported);
 int32_t NlIpShareStartGateway(const char *peerAddress);

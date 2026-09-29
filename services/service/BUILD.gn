@@ -198,6 +198,7 @@ ServiceDatatransferSrc = [
 
 ServiceIpShareSrc = [
   "src/ipshare/nearlink_ipshare_channel.cpp",
+    "src/ipshare/nearlink_ipshare_ipv6.cpp",
   "src/ipshare/nearlink_ipshare_service.cpp",
   "src/ipshare/nearlink_ipshare_tun.cpp",
 ]

@@ -20,6 +20,7 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <string>
 
 namespace OHOS::Nearlink {
 
@@ -34,6 +35,8 @@ public:
     void Close();
     int32_t Write(const uint8_t *data, uint16_t length);
     bool IsOpen() const;
+    static bool IsIpv6AddressUsable(const uint8_t address[16]);
+    static bool ParseIpv6Evidence(const std::string &text, uint32_t index, uint8_t address[16]);
 
 private:
     void ReadLoop();

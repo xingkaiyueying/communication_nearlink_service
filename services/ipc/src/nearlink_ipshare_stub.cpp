@@ -27,6 +27,7 @@ NearlinkIpShareStub::NearlinkIpShareStub()
     // The private profile has the same local authorization boundary as its system caller.
     auto permission = CHECK_PERM(true, MULTI_PERM(ACCESS_NEARLINK, CONNECTIVITY_INTERNAL));
     memberFuncMap_ = {
+        {NL_IPSHARE_UPDATE_VALIDATED_ADDRESS, {UpdateValidatedAddressInner, permission}},
         {NL_IPSHARE_IS_PEER_SUPPORTED, {IsPeerSupportedInner, permission}},
         {NL_IPSHARE_START_GATEWAY, {StartGatewayInner, permission}},
         {NL_IPSHARE_START_TERMINAL, {StartTerminalInner, permission}},
@@ -34,13 +35,19 @@ NearlinkIpShareStub::NearlinkIpShareStub()
         {NL_IPSHARE_GET_STATUS, {GetStatusInner, permission}},
         {NL_IPSHARE_REGISTER_OBSERVER, {RegisterObserverInner, permission}},
         {NL_IPSHARE_UNREGISTER_OBSERVER, {UnregisterObserverInner, permission}},
+        {NL_IPSHARE_QUERY_CAPABILITIES, {QueryNearlinkIpShareCapabilitiesInner, permission}},
+        {NL_IPSHARE_START_GATEWAY_WITH_MODE, {StartNearlinkGatewayWithModeInner, permission}},
+        {NL_IPSHARE_START_TERMINAL_WITH_MODE, {StartNearlinkTerminalWithModeInner, permission}},
+
     };
 }
 
 int32_t NearlinkIpShareStub::OnRemoteRequest(uint32_t code, MessageParcel &data, MessageParcel &reply,
     MessageOption &option)
 {
-    HILOGI("[IpShare][IPC] server request received code=%{public}u", code);
+    if (code != NL_IPSHARE_GET_STATUS) {
+        HILOGI("[IpShare][IPC] server request received code=%{public}u", code);
+    }
     CHECK_PERMISSION_AND_EXECUTE(NearlinkIpShareStub);
 }
 
@@ -120,7 +127,7 @@ int32_t NearlinkIpShareStub::GetStatusInner(NearlinkIpShareStub *stub, MessagePa
     if (ret != 0) {
         HILOGE("[IpShare][IPC] status request handled with failure ret=%{public}d", ret);
     } else {
-        HILOGI("[IpShare][IPC] status request handled role=%{public}d state=%{public}d error=%{public}d",
+        HILOGD("[IpShare][IPC] status request handled role=%{public}d state=%{public}d error=%{public}d",
             static_cast<int32_t>(status.role), static_cast<int32_t>(status.state), status.errorCode);
     }
     return NO_ERROR;
@@ -155,6 +162,40 @@ int32_t NearlinkIpShareStub::UnregisterObserverInner(NearlinkIpShareStub *stub, 
     }
     HILOGI("[IpShare][IPC] observer unregistration handled ret=%{public}d", ret);
     return NO_ERROR;
+}
+
+int32_t NearlinkIpShareStub::QueryNearlinkIpShareCapabilitiesInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply)
+{
+    std::string address;
+    if (!data.ReadString(address) || address.size() != 17) return TRANSACTION_ERR;
+    NearlinkIpShareCapabilities capabilities;
+    int32_t ret = stub->QueryNearlinkIpShareCapabilities(address, capabilities);
+    return reply.WriteInt32(ret) && (ret != 0 || reply.WriteParcelable(&capabilities)) ? NO_ERROR : TRANSACTION_ERR;
+}
+
+int32_t NearlinkIpShareStub::StartNearlinkGatewayWithModeInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply)
+{
+    std::string address;
+    if (!data.ReadString(address) || address.size() != 17) return TRANSACTION_ERR;
+    int32_t mode = 0;
+    if (!data.ReadInt32(mode) || !IsIpShareMode(mode)) return TRANSACTION_ERR;
+    return reply.WriteInt32(stub->StartNearlinkGatewayWithMode(address, mode)) ? NO_ERROR : TRANSACTION_ERR;
+}
+
+int32_t NearlinkIpShareStub::StartNearlinkTerminalWithModeInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply)
+{
+    std::string address;
+    if (!data.ReadString(address) || address.size() != 17) return TRANSACTION_ERR;
+    int32_t mode = 0;
+    if (!data.ReadInt32(mode) || !IsIpShareMode(mode)) return TRANSACTION_ERR;
+    return reply.WriteInt32(stub->StartNearlinkTerminalWithMode(address, mode)) ? NO_ERROR : TRANSACTION_ERR;
+}
+
+int32_t NearlinkIpShareStub::UpdateValidatedAddressInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply)
+{
+    NearlinkIpShareAddressEvidence address;
+    if (data.GetReadableBytes() > 256 || !address.Read(data) || data.GetReadableBytes() != 0) return TRANSACTION_ERR;
+    return reply.WriteInt32(stub->UpdateValidatedAddress(address)) ? NO_ERROR : TRANSACTION_ERR;
 }
 
 }  // namespace OHOS::Nearlink

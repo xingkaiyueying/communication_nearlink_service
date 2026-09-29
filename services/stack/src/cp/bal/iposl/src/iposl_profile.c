@@ -25,6 +25,7 @@
 
 static IposlProfileCallbacks g_callbacks;
 static bool g_initialized;
+static atomic_uint_fast64_t g_sendGeneration;
 
 const IposlProfileCallbacks *IposlGetCallbacks(void)
 {
@@ -33,7 +34,8 @@ const IposlProfileCallbacks *IposlGetCallbacks(void)
 
 int32_t IposlProfileInit(const IposlProfileCallbacks *callbacks)
 {
-    if (callbacks == NULL || callbacks->onPeerSupported == NULL || callbacks->onConfigured == NULL) {
+    if (callbacks == NULL || callbacks->onPeerSupported == NULL || callbacks->onConfigured == NULL ||
+        callbacks->prepareMode == NULL || callbacks->isSecure == NULL || callbacks->canSend == NULL) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL] profile init rejected: callback incomplete");
         return IPOSL_ERR_INVALID_PARAM;
     }
@@ -58,6 +60,7 @@ int32_t IposlProfileInit(const IposlProfileCallbacks *callbacks)
 void IposlProfileDeinit(void)
 {
     NLSTK_LOG_INFO("[IpShare][IPoSL] profile deinit started");
+    atomic_store(&g_sendGeneration, 0);
     IposlClientStop();
     IposlServerDeinit();
     (void)memset(&g_callbacks, 0, sizeof(g_callbacks));
@@ -65,13 +68,14 @@ void IposlProfileDeinit(void)
     NLSTK_LOG_INFO("[IpShare][IPoSL] profile deinit completed");
 }
 
-int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
+int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation)
 {
     if (!g_initialized) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL] server start rejected: profile not initialized");
         return IPOSL_ERR_INVALID_STATE;
     }
-    int32_t ret = IposlServerStart(peer, addressType);
+    atomic_store(&g_sendGeneration, generation);
+    int32_t ret = IposlServerStart(peer, addressType, mode, generation);
     if (ret != IPOSL_SUCCESS) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL] server start failed addressType=%u ret=%d", addressType, ret);
     } else {
@@ -82,17 +86,18 @@ int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t
 
 void IposlProfileStopServer(void)
 {
+    atomic_store(&g_sendGeneration, 0);
     IposlServerStop();
     NLSTK_LOG_INFO("[IpShare][IPoSL] server stopped");
 }
 
-int32_t IposlProfileProbePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
+int32_t IposlProfileProbePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation)
 {
     if (!g_initialized) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL] support probe rejected: profile not initialized");
         return IPOSL_ERR_INVALID_STATE;
     }
-    int32_t ret = IposlClientStart(peer, addressType, false, NULL);
+    int32_t ret = IposlClientStart(peer, addressType, false, NULL, mode, generation);
     if (ret != IPOSL_SUCCESS) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL] support probe client start failed addressType=%u ret=%d", addressType, ret);
     } else {
@@ -102,13 +107,14 @@ int32_t IposlProfileProbePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t a
 }
 
 int32_t IposlProfileStartTerminal(const uint8_t gateway[IPOSL_LAYER2_ID_LEN], uint8_t addressType,
-    const uint8_t localLayer2[IPOSL_LAYER2_ID_LEN])
+    const uint8_t localLayer2[IPOSL_LAYER2_ID_LEN], uint8_t mode, uint64_t generation)
 {
     if (!g_initialized) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL] terminal start rejected: profile not initialized");
         return IPOSL_ERR_INVALID_STATE;
     }
-    int32_t ret = IposlClientStart(gateway, addressType, true, localLayer2);
+    atomic_store(&g_sendGeneration, generation);
+    int32_t ret = IposlClientStart(gateway, addressType, true, localLayer2, mode, generation);
     if (ret != IPOSL_SUCCESS) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL] terminal client start failed addressType=%u ret=%d", addressType, ret);
     } else {
@@ -119,6 +125,7 @@ int32_t IposlProfileStartTerminal(const uint8_t gateway[IPOSL_LAYER2_ID_LEN], ui
 
 void IposlProfileStopClient(void)
 {
+    atomic_store(&g_sendGeneration, 0);
     IposlClientStop();
     NLSTK_LOG_INFO("[IpShare][IPoSL] client stopped");
 }
@@ -140,6 +147,8 @@ typedef struct {
     uint16_t lcid;
     uint16_t length;
     uint8_t tcid;
+    uint8_t pi;
+    uint64_t generation;
     uint8_t payload[];
 } IposlSendTask;
 
@@ -154,6 +163,8 @@ static void IposlSendRelease(void *arg)
 static void IposlSendOnCp(void *arg)
 {
     IposlSendTask *task = arg;
+    const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
+    if (callbacks == NULL || !callbacks->canSend(task->lcid, task->tcid, task->pi, task->generation)) return;
     SDF_Buff_S *buff = SDF_BuffNewWithReserve(task->length);
     if (buff == NULL) {
         return;
@@ -164,7 +175,7 @@ static void IposlSendOnCp(void *arg)
         return;
     }
     (void)memcpy(payload, task->payload, task->length);
-    DTAP_Data_S packet = {.pi = DTAP_PI_IPV4, .lcid = task->lcid, .tcid = task->tcid, .buff = buff};
+    DTAP_Data_S packet = {.pi = task->pi, .lcid = task->lcid, .tcid = task->tcid, .buff = buff};
     task->result = (int32_t)DTAP_DataSend(&packet);
     if (task->result != 0) {
         SDF_BuffFree(buff);
@@ -174,7 +185,13 @@ static void IposlSendOnCp(void *arg)
 
 int32_t IposlProfileSendIpv4(uint16_t lcid, uint8_t tcid, const uint8_t *data, uint16_t length)
 {
-    if (data == NULL || length == 0 || length > 1500) {
+    return IposlProfileSendIp(lcid, tcid, DTAP_PI_IPV4, data, length, atomic_load(&g_sendGeneration));
+}
+
+int32_t IposlProfileSendIp(uint16_t lcid, uint8_t tcid, uint8_t pi, const uint8_t *data,
+    uint16_t length, uint64_t generation)
+{
+    if (!IposlCodecValidatePacket(pi, data, length)) {
         return IPOSL_ERR_INVALID_PARAM;
     }
     IposlSendTask *task = SDF_MemAlloc(sizeof(*task) + length);
@@ -185,6 +202,8 @@ int32_t IposlProfileSendIpv4(uint16_t lcid, uint8_t tcid, const uint8_t *data, u
     task->result = IPOSL_ERR_INVALID_STATE;
     task->lcid = lcid;
     task->tcid = tcid;
+    task->pi = pi;
+    task->generation = generation;
     task->length = length;
     (void)memcpy(task->payload, data, length);
     /* Like Transport, wait at most 500 ms. The task owns its copy after timeout. */

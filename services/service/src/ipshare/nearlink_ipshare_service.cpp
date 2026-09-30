@@ -858,7 +858,7 @@ bool NearlinkIpShareService::IsSecure(const uint8_t peer[6], uint64_t generation
             service.status_.state == NearlinkIpShareState::IDLE ||
             service.status_.state == NearlinkIpShareState::ERROR) return false;
         if (!service.gatewayAny_ && memcmp(service.peer_, peer, 6) != 0) return false;
-        address = service.gatewayAny_ ? RawAddress::ConvertToString(peer) : service.status_.peerAddress;
+        address = service.gatewayAny_ ? RawAddress::ConvertToString(peer).GetAddress() : service.status_.peerAddress;
     }
     uint8_t verified[6], type = 0;
     return service.ValidateSecurePeer(address, verified, type) == 0 && memcmp(verified, peer, 6) == 0;
@@ -869,7 +869,7 @@ bool NearlinkIpShareService::IsSecureAddress(const uint8_t peer[6], uint8_t addr
     if (!IsSecure(peer, generation)) return false;
     uint8_t verified[6] = {}, type = 0;
     auto &service = GetInstance();
-    return service.ValidateSecurePeer(RawAddress::ConvertToString(peer), verified, type) == 0 &&
+    return service.ValidateSecurePeer(RawAddress::ConvertToString(peer).GetAddress(), verified, type) == 0 &&
         type == addressType && memcmp(verified, peer, 6) == 0;
 }
 
@@ -898,7 +898,7 @@ int32_t NearlinkIpShareService::PrepareMode(const uint8_t peer[6], uint8_t mode,
         while (slot < service.gatewayPeers_.size() && service.gatewayPeers_[slot] != nullptr) ++slot;
         if (slot == service.gatewayPeers_.size()) return -1;
         uint8_t verified[6] = {}, type = 0;
-        if (service.ValidateSecurePeer(RawAddress::ConvertToString(peer), verified, type) != 0 ||
+        if (service.ValidateSecurePeer(RawAddress::ConvertToString(peer).GetAddress(), verified, type) != 0 ||
             memcmp(verified, peer, 6) != 0) return -1;
         auto entry = std::make_unique<GatewayPeer>();
         entry->address = {peer[0], peer[1], peer[2], peer[3], peer[4], peer[5]};

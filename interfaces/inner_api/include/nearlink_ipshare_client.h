@@ -38,6 +38,7 @@ public:
     int32_t StartGateway(const std::string &peerAddress) const;
     int32_t StartGatewayAny(int32_t mode, int32_t maxTerminals) const;
     int32_t GetSupportedMaxTerminals() const;
+    int32_t CompleteGatewayPeerRelease(uint64_t generation) const;
     int32_t StartTerminal(const std::string &gatewayAddress) const;
     int32_t Stop() const;
     int32_t GetStatus(NearlinkIpShareStatus &status) const;

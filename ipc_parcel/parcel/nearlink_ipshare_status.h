@@ -84,6 +84,14 @@ enum class NearlinkIpShareState : int32_t {
     ERROR = 11,
 };
 
+struct NearlinkIpSharePeerLink {
+    uint32_t slot{0};
+    uint64_t generation{0};
+    int32_t selectedMode{0};
+    std::string ifaceName;
+    bool releasing{false};
+};
+
 class NearlinkIpShareStatus final : public Parcelable {
 public:
     NearlinkIpShareRole role {NearlinkIpShareRole::NONE};
@@ -100,6 +108,7 @@ public:
     NearlinkIpShareMode requestedMode {NearlinkIpShareMode::NONE};
     NearlinkIpShareMode selectedMode {NearlinkIpShareMode::NONE};
     bool serviceReady {false};
+    std::vector<NearlinkIpSharePeerLink> peerLinks; // bounded internal L3 snapshot; same-version SA/client
 
     bool Marshalling(Parcel &parcel) const override;
     static NearlinkIpShareStatus *Unmarshalling(Parcel &parcel);

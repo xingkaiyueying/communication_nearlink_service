@@ -44,6 +44,7 @@ private:
     int32_t Transact(uint32_t code, MessageParcel &data, MessageParcel &reply);
     int32_t AddressCommand(uint32_t code, const std::string &address);
     static inline BrokerDelegator<NearlinkIpShareProxy> delegator_;
+    int32_t CompleteGatewayPeerRelease(uint64_t generation) override;
 };
 
 }  // namespace OHOS::Nearlink

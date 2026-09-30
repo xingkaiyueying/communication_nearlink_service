@@ -40,6 +40,7 @@ public:
     int32_t StartGateway(const std::string &peerAddress);
     int32_t StartGatewayAny(int32_t mode, int32_t maxTerminals);
     int32_t GetSupportedMaxTerminals() const;
+    int32_t CompleteGatewayPeerRelease(uint64_t generation);
     void OnPeerDisconnected(const std::string &peerAddress);
     int32_t StartTerminal(const std::string &gatewayAddress);
     int32_t Stop();
@@ -75,6 +76,7 @@ private:
     static bool IsSecureAddress(const uint8_t peer[6], uint8_t addressType, uint64_t generation);
     bool IsCurrent(uint64_t generation) const;
     void StampLocked();
+    void RefreshPeerLinksLocked();
     struct GatewayPeer {
         std::array<uint8_t, 6> address{};
         uint8_t addressType{0};

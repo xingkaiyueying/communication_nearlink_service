@@ -26,6 +26,11 @@ int32_t NearlinkIpShareServer::IsPeerSupported(const std::string &peerAddress, b
     return ret;
 }
 
+int32_t NearlinkIpShareServer::CompleteGatewayPeerRelease(uint64_t generation)
+{
+    return NearlinkIpShareService::GetInstance().CompleteGatewayPeerRelease(generation);
+}
+
 int32_t NearlinkIpShareServer::StartGatewayAny(int32_t mode, int32_t maxTerminals)
 {
     return NearlinkIpShareService::GetInstance().StartGatewayAny(mode, maxTerminals);

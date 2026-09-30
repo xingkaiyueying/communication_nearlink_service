@@ -43,6 +43,7 @@ public:
     virtual int32_t StartNearlinkTerminalWithMode(const std::string &peerAddress, int32_t mode) = 0;
 
     virtual int32_t UpdateValidatedAddress(const NearlinkIpShareAddressEvidence &address) = 0;
+    virtual int32_t CompleteGatewayPeerRelease(uint64_t generation) = 0;
 };
 
 }  // namespace OHOS::Nearlink

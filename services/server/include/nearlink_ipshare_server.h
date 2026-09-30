@@ -35,6 +35,7 @@ public:
     int32_t StartNearlinkGatewayWithMode(const std::string &peerAddress, int32_t mode) override;
     int32_t StartNearlinkTerminalWithMode(const std::string &peerAddress, int32_t mode) override;
 
+    int32_t CompleteGatewayPeerRelease(uint64_t generation) override;
 };
 
 }  // namespace OHOS::Nearlink

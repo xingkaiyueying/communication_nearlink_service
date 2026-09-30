@@ -26,6 +26,19 @@ int main()
     value.peerAddress.assign(18,'x'); Parcel bad; assert(!value.Marshalling(bad));
     value.peerAddress.clear(); value.requestedMode = NearlinkIpShareMode::IPV4;
     assert(!value.Marshalling(bad));
+    NearlinkIpShareStatus gateway;
+    gateway.role=NearlinkIpShareRole::GATEWAY; gateway.requestedMode=NearlinkIpShareMode::DUAL_STACK;
+    gateway.peerLinks={{0,10,1,"sleip0",false},{1,11,3,"sleip1",true}};
+    Parcel peers;assert(gateway.Marshalling(peers));
+    NearlinkIpShareStatus peerCopy;assert(peerCopy.ReadFromParcel(peers));
+    assert(peerCopy.peerLinks.size()==2 && peerCopy.peerLinks[1].releasing);
+    for(size_t n=0;n<peers.bytes.size();++n) {
+        Parcel truncated;truncated.bytes.assign(peers.bytes.begin(),peers.bytes.begin()+n);
+        NearlinkIpShareStatus target;assert(!target.ReadFromParcel(truncated));
+    }
+    gateway.peerLinks[1].slot=0;Parcel dup;assert(!gateway.Marshalling(dup));
+    gateway.peerLinks[1].slot=1;gateway.peerLinks[1].ifaceName="sleip0";assert(!gateway.Marshalling(dup));
+    gateway.peerLinks.resize(33);assert(!gateway.Marshalling(dup));
     NearlinkIpShareCapabilities cap; cap.identifierPresent = true; cap.discoveryState = 1;
     cap.peerModes = {1,3}; cap.peerCapabilityKnown = true;
     Parcel caps; assert(cap.Marshalling(caps));

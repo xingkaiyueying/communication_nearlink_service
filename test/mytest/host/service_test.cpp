@@ -37,8 +37,8 @@ int32_t NearlinkIpShareTun::Open(const PacketCallback &, const std::string &) { 
 void NearlinkIpShareTun::Close() { fd_=-1; }
 int32_t NearlinkIpShareTun::Write(const uint8_t *,uint16_t) { ++writes; return 0; }
 bool NearlinkIpShareTun::IsOpen() const { return fd_>=0; }
-bool NearlinkIpShareTun::ParseIpv6Evidence(const std::string &,uint32_t,uint8_t *) { return false; }
-bool NearlinkIpShareTun::IsIpv6AddressUsable(const uint8_t *) { return true; }
+bool NearlinkIpShareTun::ParseIpv6Evidence(const std::string &,uint32_t,uint8_t *,const std::string &) { return false; }
+bool NearlinkIpShareTun::IsIpv6AddressUsable(const uint8_t *,const std::string &) { return true; }
 }
 struct Observer : INearlinkIpShareObserver {
     uint64_t generation=0, sequence=0; int events=0;
@@ -138,7 +138,12 @@ int main()
     assert(s.gatewayPeers_[0]->active && firstChannel->CanSend(13,4,1,s.gatewayPeers_[0]->epoch));
     s.GetStatus(status); assert(status.state==NearlinkIpShareState::CHANNEL_READY &&
         status.ifaceName=="sleip0" && status.peerAddress.empty());
+    auto oldEpoch = s.gatewayPeers_[0]->epoch;
     firstRsp.status=QOSM_TRANS_CHANNEL_RELEASED; c.HandleChannelStatus(&firstRsp); DrainTasks();
+    assert(s.gatewayPeers_[0] && s.gatewayPeers_[0]->releasing);
+    assert(profileCallbacks.prepareMode(second,1,gatewayGen)!=0); // still occupied until L3 cleanup
+    assert(s.CompleteGatewayPeerRelease(oldEpoch+1)!=0);
+    assert(s.CompleteGatewayPeerRelease(oldEpoch)==0); DrainTasks();
     assert(s.gatewayPeers_[0]==nullptr && s.GetStatus(status)==0 && status.serviceReady &&
         status.state==NearlinkIpShareState::SERVING_NO_UPSTREAM && status.ifaceName.empty());
     assert(profileCallbacks.prepareMode(second,1,gatewayGen)==0); // released slot reusable
@@ -151,6 +156,7 @@ int main()
     profileCallbacks.onConfigured(second,true,0,1,gatewayGen); DrainTasks();
     assert(s.gatewayPeers_[0]->channel->tun_.IsOpen() && s.gatewayPeers_[1]->channel->tun_.IsOpen());
     s.OnPeerDisconnected(address); DrainTasks();
+    assert(s.CompleteGatewayPeerRelease(s.gatewayPeers_[0]->epoch)==0); DrainTasks();
     assert(s.gatewayPeers_[0]==nullptr && s.gatewayPeers_[1]!=nullptr &&
         s.gatewayPeers_[1]->channel->tun_.IsOpen()); // A2 survives A1 departure
     assert(s.Stop()==0); DrainTasks(); s.GetStatus(status); assert(status.state==NearlinkIpShareState::IDLE);

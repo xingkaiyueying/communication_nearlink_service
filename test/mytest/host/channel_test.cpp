@@ -29,12 +29,12 @@ int32_t NearlinkIpShareTun::Open(const PacketCallback &, const std::string &) { 
 void NearlinkIpShareTun::Close() { fd_ = -1; }
 int32_t NearlinkIpShareTun::Write(const uint8_t *, uint16_t) { ++tunWrites; return fd_ >= 0 ? 0 : -1; }
 bool NearlinkIpShareTun::IsOpen() const { return fd_ >= 0; }
-bool NearlinkIpShareTun::ParseIpv6Evidence(const std::string &text,uint32_t index,uint8_t *out)
+bool NearlinkIpShareTun::ParseIpv6Evidence(const std::string &text,uint32_t index,uint8_t *out,const std::string &)
 {
     if (text != "fe80::42" || index != 7) return false;
     auto address = Lla(0x42); std::copy(address.begin(), address.end(), out); return true;
 }
-bool NearlinkIpShareTun::IsIpv6AddressUsable(const uint8_t *) { return true; } // kernel boundary
+bool NearlinkIpShareTun::IsIpv6AddressUsable(const uint8_t *,const std::string &) { return true; } // kernel boundary
 }
 int main()
 {
@@ -111,6 +111,28 @@ int main()
         ProbeDhcp(dhcp,m,peer);
         assert(c.AuthorizePacket(dhcp,300,10,m == 1 || m == 3));
     }
+    NearlinkIpShareChannel isolated;
+    isolated.active_=isolated.enabled_=isolated.channelEstablished_=true;
+    isolated.generation_=20;isolated.gateway_=true;isolated.ifaceName_="sleip1";
+    uint8_t otherPeer[6]={2,1,2,3,4,6};memcpy(isolated.clientKey_,otherPeer,6);
+    for(uint8_t message : {1,2,3,5}) {
+        ProbeDhcp(dhcp,message,otherPeer);
+        for(unsigned offset : {14u,46u,275u,281u}) if(dhcp[offset]==77) dhcp[offset]=78;
+        dhcp[10]=dhcp[11]=0;ProbePut16(dhcp+10,ProbeChecksum(dhcp,20,0));
+        if(message==2) {
+            uint8_t wrongReply[300];ProbeDhcp(wrongReply,2,peer);
+            assert(!isolated.AuthorizePacket(wrongReply,300,20,false)); // another peer's OFFER
+            auto xid=dhcp[35];dhcp[35]^=1;
+            assert(!isolated.AuthorizePacket(dhcp,300,20,false));dhcp[35]=xid;
+        }
+        assert(isolated.AuthorizePacket(dhcp,300,20,message==1 || message==3));
+    }
+    assert(c.boundIp_!=isolated.boundIp_);
+    ProbeData(packet,1,false,peer,local,1);
+    assert(!isolated.AuthorizePacket(packet,1500,20,true)); // first peer's source cannot enter second link
+    packet[14]=78;packet[10]=packet[11]=0;ProbePut16(packet+10,ProbeChecksum(packet,20,0));
+    assert(isolated.AuthorizePacket(packet,1500,20,true));
+    assert(!c.AuthorizePacket(packet,1500,10,true));
     for (uint8_t round = 0; round < 8; ++round) for (uint8_t pi : {1,2}) {
         ProbeData(packet,pi,true,local,peer,round); assert(c.Send(packet,1500) == 0 && sentPi == pi);
         ProbeData(buffer.data,pi,false,peer,local,round); info.pi = pi;

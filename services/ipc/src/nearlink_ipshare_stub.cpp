@@ -32,6 +32,7 @@ NearlinkIpShareStub::NearlinkIpShareStub()
         {NL_IPSHARE_START_GATEWAY, {StartGatewayInner, permission}},
         {NL_IPSHARE_START_GATEWAY_ANY, {StartGatewayAnyInner, permission}},
         {NL_IPSHARE_SUPPORTED_MAX_TERMINALS, {GetSupportedMaxTerminalsInner, permission}},
+        {NL_IPSHARE_COMPLETE_PEER_RELEASE, {CompleteGatewayPeerReleaseInner, permission}},
         {NL_IPSHARE_START_TERMINAL, {StartTerminalInner, permission}},
         {NL_IPSHARE_STOP, {StopInner, permission}},
         {NL_IPSHARE_GET_STATUS, {GetStatusInner, permission}},
@@ -69,6 +70,16 @@ int32_t NearlinkIpShareStub::IsPeerSupportedInner(NearlinkIpShareStub *stub, Mes
     }
     HILOGI("[IpShare][IPC] support request handled ret=%{public}d supported=%{public}d", ret, supported);
     return NO_ERROR;
+}
+
+int32_t NearlinkIpShareStub::CompleteGatewayPeerReleaseInner(NearlinkIpShareStub *stub, MessageParcel &data,
+                                                             MessageParcel &reply)
+{
+    uint64_t generation = 0;
+    if (data.GetReadableBytes() != sizeof(uint64_t) || !data.ReadUint64(generation) || !generation ||
+        data.GetReadableBytes() != 0)
+        return TRANSACTION_ERR;
+    return reply.WriteInt32(stub->CompleteGatewayPeerRelease(generation)) ? NO_ERROR : TRANSACTION_ERR;
 }
 
 int32_t NearlinkIpShareStub::StartGatewayAnyInner(NearlinkIpShareStub *stub,

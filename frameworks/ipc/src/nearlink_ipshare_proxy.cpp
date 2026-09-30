@@ -77,6 +77,17 @@ int32_t NearlinkIpShareProxy::IsPeerSupported(const std::string &peerAddress, bo
     return ret;
 }
 
+int32_t NearlinkIpShareProxy::CompleteGatewayPeerRelease(uint64_t generation)
+{
+    MessageParcel data, reply;
+    if (!generation)
+        return NL_ERR_INVALID_PARAM;
+    if (!data.WriteInterfaceToken(GetDescriptor()) || !data.WriteUint64(generation))
+        return NL_ERR_IPC_TRANS_FAILED;
+    int32_t ret = Transact(NL_IPSHARE_COMPLETE_PEER_RELEASE, data, reply);
+    return ret == NL_NO_ERROR && reply.ReadInt32(ret) ? ret : NL_ERR_IPC_TRANS_FAILED;
+}
+
 int32_t NearlinkIpShareProxy::StartGatewayAny(int32_t mode, int32_t maxTerminals)
 {
     if (!IsIpShareMode(mode) || maxTerminals < 1 || maxTerminals > 32) return NL_ERR_INVALID_PARAM;

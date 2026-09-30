@@ -17,21 +17,31 @@
 #include <new>
 
 namespace OHOS::Nearlink {
-namespace { bool ValidStatus(const NearlinkIpShareStatus &s); }
+namespace {
+bool ValidStatus(const NearlinkIpShareStatus &s);
+bool WritePeerLinks(Parcel &p, const std::vector<NearlinkIpSharePeerLink> &links)
+{
+    if (links.size() > 32 || !p.WriteUint32(links.size()))
+        return false;
+    for (const auto &link : links) {
+        if (!p.WriteUint32(link.slot) || !p.WriteUint64(link.generation) || !p.WriteInt32(link.selectedMode) ||
+            !p.WriteString(link.ifaceName) || !p.WriteBool(link.releasing))
+            return false;
+    }
+    return true;
+}
+} // namespace
 
 bool NearlinkIpShareStatus::Marshalling(Parcel &parcel) const
 {
     return ValidStatus(*this) && parcel.WriteInt32(static_cast<int32_t>(role)) &&
-        parcel.WriteInt32(static_cast<int32_t>(state)) &&
-        parcel.WriteString(peerAddress) &&
-        parcel.WriteString(ifaceName) &&
-        parcel.WriteString(ipv4Address) &&
-        parcel.WriteBool(hasUpstream) &&
-        parcel.WriteString(errorStage) &&
-        parcel.WriteInt32(errorCode) && parcel.WriteString(contextId) &&
-        parcel.WriteUint64(generation) && parcel.WriteUint64(sequence) &&
-        parcel.WriteInt32(static_cast<int32_t>(requestedMode)) &&
-        parcel.WriteInt32(static_cast<int32_t>(selectedMode)) && parcel.WriteBool(serviceReady);
+           parcel.WriteInt32(static_cast<int32_t>(state)) && parcel.WriteString(peerAddress) &&
+           parcel.WriteString(ifaceName) && parcel.WriteString(ipv4Address) && parcel.WriteBool(hasUpstream) &&
+           parcel.WriteString(errorStage) && parcel.WriteInt32(errorCode) && parcel.WriteString(contextId) &&
+           parcel.WriteUint64(generation) && parcel.WriteUint64(sequence) &&
+           parcel.WriteInt32(static_cast<int32_t>(requestedMode)) &&
+           parcel.WriteInt32(static_cast<int32_t>(selectedMode)) && parcel.WriteBool(serviceReady) &&
+           WritePeerLinks(parcel, peerLinks);
 }
 
 NearlinkIpShareStatus *NearlinkIpShareStatus::Unmarshalling(Parcel &parcel)
@@ -49,6 +59,18 @@ bool ValidStatus(const NearlinkIpShareStatus &s)
 {
     int32_t role = static_cast<int32_t>(s.role), state = static_cast<int32_t>(s.state);
     int32_t requested = static_cast<int32_t>(s.requestedMode), selected = static_cast<int32_t>(s.selectedMode);
+    if (s.peerLinks.size() > 32 || (!s.peerLinks.empty() && role != 1))
+        return false;
+    uint32_t previous = 0;
+    bool first = true;
+    for (const auto &link : s.peerLinks) {
+        if (link.slot >= 32 || !link.generation || !IsIpShareMode(link.selectedMode) ||
+            (link.selectedMode & requested) != link.selectedMode ||
+            link.ifaceName != "sleip" + std::to_string(link.slot) || (!first && link.slot <= previous))
+            return false;
+        previous = link.slot;
+        first = false;
+    }
     return role >= 0 && role <= 2 && state >= 0 && state <= 11 &&
         (requested == 0 || IsIpShareMode(requested)) && (selected == 0 || IsIpShareMode(selected)) &&
         (selected & requested) == selected && s.peerAddress.size() <= 17 && s.ifaceName.size() <= 15 &&
@@ -89,6 +111,17 @@ bool NearlinkIpShareStatus::ReadFromParcel(Parcel &parcel)
     value.state = static_cast<NearlinkIpShareState>(state);
     value.requestedMode = static_cast<NearlinkIpShareMode>(requested);
     value.selectedMode = static_cast<NearlinkIpShareMode>(selected);
+    uint32_t count = 0;
+    if (!parcel.ReadUint32(count) || count > 32)
+        return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        NearlinkIpSharePeerLink link;
+        if (!parcel.ReadUint32(link.slot) || !parcel.ReadUint64(link.generation) ||
+            !parcel.ReadInt32(link.selectedMode) || !parcel.ReadString(link.ifaceName) ||
+            !parcel.ReadBool(link.releasing))
+            return false;
+        value.peerLinks.push_back(link);
+    }
     if (!ValidStatus(value)) return false;
     *this = value;
     return true;

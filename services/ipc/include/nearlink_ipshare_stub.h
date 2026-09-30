@@ -50,6 +50,7 @@ private:
     static int32_t StartNearlinkGatewayWithModeInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
     static int32_t StartNearlinkTerminalWithModeInner(NearlinkIpShareStub *stub, MessageParcel &data, MessageParcel &reply);
     static int32_t UpdateValidatedAddressInner(NearlinkIpShareStub *, MessageParcel &, MessageParcel &);
+    static int32_t CompleteGatewayPeerReleaseInner(NearlinkIpShareStub *, MessageParcel &, MessageParcel &);
     std::map<uint32_t, HandlerWithPermission> memberFuncMap_;
 };
 

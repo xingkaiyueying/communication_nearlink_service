@@ -108,6 +108,7 @@ private:
 
     std::mutex mutex_;
     NearlinkIpShareTun tun_;
+    std::string ifaceName_{"sleip0"};
     StateCallback callback_;
     uint8_t peer_[6]{};
     uint8_t localLayer2_[6]{};

@@ -249,11 +249,11 @@ int32_t NearlinkIpShareChannel::UpdateValidatedAddress(const NearlinkIpShareAddr
     NearlinkIpShareIpv6::Address binary{};
     if (!active_ || !enabled_ || mode_ != 3 || !channelEstablished_ || address.generation != generation_ ||
         address.sequence <= addressSequence_ || address.prefixLength > 128 ||
-        !NearlinkIpShareTun::ParseIpv6Evidence(address.address, address.ifindex, binary.data())) {
+        !NearlinkIpShareTun::ParseIpv6Evidence(address.address, address.ifindex, binary.data(), ifaceName_)) {
         return -1;
     }
     if (address.validLifetime && (address.flags & (0x40 | 0x08 | 0x04)) == 0 &&
-        !NearlinkIpShareTun::IsIpv6AddressUsable(binary.data())) {
+        !NearlinkIpShareTun::IsIpv6AddressUsable(binary.data(), ifaceName_)) {
         return -1;
     }
     auto now =
@@ -315,6 +315,7 @@ int NearlinkIpShareChannel::OnIpv6Received(DTAP_Data_Info_S *info, SDF_Buff_S *b
 
 int32_t NearlinkIpShareChannel::CreateTun(const std::string &ifaceName)
 {
+    ifaceName_ = ifaceName;
     HILOGI("[IpShare][Channel] create TUN requested");
     int32_t ret = tun_.Open([this](const uint8_t *data, uint16_t length) {
         if (Send(data, length) != 0) {
@@ -925,7 +926,8 @@ bool NearlinkIpShareChannel::AuthorizePacket(const uint8_t *data, uint16_t lengt
         // Revalidate at most once per monotonic second; generation reset and address
         // evidence still revoke cached records immediately.
         if (verifyLocal && !next.LocalUsable(local, !gateway_, now) &&
-            (!NearlinkIpShareTun::IsIpv6AddressUsable(data + 8) || !next.ObserveKernelLocal(local, !gateway_, now))) {
+            (!NearlinkIpShareTun::IsIpv6AddressUsable(data + 8, ifaceName_) ||
+             !next.ObserveKernelLocal(local, !gateway_, now))) {
             return false;
         }
         size_t oldRecords = ipv6_.Mappings().size();

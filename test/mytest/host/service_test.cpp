@@ -136,8 +136,11 @@ int main()
     firstRsp.lcid=13; firstRsp.tcid=4; firstRsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED;
     assert(c.HandleChannelStatus(&firstRsp)); DrainTasks();
     assert(s.gatewayPeers_[0]->active && firstChannel->CanSend(13,4,1,s.gatewayPeers_[0]->epoch));
+    s.GetStatus(status); assert(status.state==NearlinkIpShareState::CHANNEL_READY &&
+        status.ifaceName=="sleip0" && status.peerAddress.empty());
     firstRsp.status=QOSM_TRANS_CHANNEL_RELEASED; c.HandleChannelStatus(&firstRsp); DrainTasks();
-    assert(s.gatewayPeers_[0]==nullptr && s.GetStatus(status)==0 && status.serviceReady);
+    assert(s.gatewayPeers_[0]==nullptr && s.GetStatus(status)==0 && status.serviceReady &&
+        status.state==NearlinkIpShareState::SERVING_NO_UPSTREAM && status.ifaceName.empty());
     assert(profileCallbacks.prepareMode(second,1,gatewayGen)==0); // released slot reusable
     assert(s.Stop()==0); DrainTasks(); s.GetStatus(status); assert(status.state==NearlinkIpShareState::IDLE);
     assert(s.StartGatewayAny(3,2)==0); DrainTasks(); s.GetStatus(status); gatewayGen=status.generation;

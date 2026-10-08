@@ -928,6 +928,9 @@ bool NearlinkIpShareChannel::AuthorizePacket(const uint8_t *data, uint16_t lengt
         if (verifyLocal && !next.LocalUsable(local, !gateway_, now) &&
             (!NearlinkIpShareTun::IsIpv6AddressUsable(data + 8, ifaceName_) ||
              !next.ObserveKernelLocal(local, !gateway_, now))) {
+            HILOGW("[IpShare][IPv6][PolicyReject] iface=%{public}s generation=%{public}llu "
+                   "direction=tx stage=LOCAL_ADDRESS length=%{public}u",
+                   ifaceName_.c_str(), static_cast<unsigned long long>(generation_), length);
             return false;
         }
         size_t oldRecords = ipv6_.Mappings().size();
@@ -937,6 +940,23 @@ bool NearlinkIpShareChannel::AuthorizePacket(const uint8_t *data, uint16_t lengt
                                             [](const auto &mapping) { return mapping.conflict; });
         bool allowed = next.Authorize(data, length, gateway_ == received, received ? peer_ : localLayer2_,
                                       static_cast<uint64_t>(seconds));
+        if (!allowed) {
+            auto state = [&next](const uint8_t *address, bool terminal) {
+                for (const auto &mapping : next.Mappings()) {
+                    if (mapping.terminal == terminal &&
+                        std::equal(mapping.address.begin(), mapping.address.end(), address)) {
+                        return 1 | (mapping.confirmed ? 2 : 0) | (mapping.conflict ? 4 : 0);
+                    }
+                }
+                return 0;
+            };
+            bool terminal = gateway_ == received;
+            HILOGW("[IpShare][IPv6][PolicyReject] iface=%{public}s generation=%{public}llu "
+                   "direction=%{public}s stage=WIRE_POLICY nextHeader=%{public}u length=%{public}u "
+                   "srcState=%{public}d dstState=%{public}d",
+                   ifaceName_.c_str(), static_cast<unsigned long long>(generation_), received ? "rx" : "tx",
+                   data[6], length, state(data + 8, terminal), state(data + 24, !terminal));
+        }
         if (allowed) {
             ipv6_ = std::move(next);
             size_t confirmed = std::count_if(ipv6_.Mappings().begin(), ipv6_.Mappings().end(),
@@ -947,10 +967,12 @@ bool NearlinkIpShareChannel::AuthorizePacket(const uint8_t *data, uint16_t lengt
             size_t conflicts = std::count_if(ipv6_.Mappings().begin(), ipv6_.Mappings().end(),
                                              [](const auto &mapping) { return mapping.conflict; });
             if (oldRecords != ipv6_.Mappings().size() || oldConfirmed != confirmed || oldConflicts != conflicts) {
-                HILOGI("[IpShare][IPv6] mapping transition generation=%{public}llu direction=%{public}s "
+                HILOGI("[IpShare][IPv6] mapping transition iface=%{public}s generation=%{public}llu "
+                       "direction=%{public}s "
                        "records=%{public}zu confirmed=%{public}zu terminalConfirmed=%{public}zu "
                        "gatewayConfirmed=%{public}zu conflicts=%{public}zu",
-                       static_cast<unsigned long long>(generation_), received ? "rx" : "tx", ipv6_.Mappings().size(),
+                       ifaceName_.c_str(), static_cast<unsigned long long>(generation_), received ? "rx" : "tx",
+                       ipv6_.Mappings().size(),
                        confirmed, terminalConfirmed, confirmed - terminalConfirmed, conflicts);
             }
         }

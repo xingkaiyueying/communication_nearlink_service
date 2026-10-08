@@ -119,7 +119,8 @@ void NearlinkIpShareIpv6::Expire(uint64_t now)
 {
     mappings_.erase(std::remove_if(mappings_.begin(), mappings_.end(),
                                    [now](const Mapping &m) {
-                                       return m.validUntil <= now || (!m.confirmed && m.candidateUntil <= now);
+                                       return m.validUntil <= now ||
+                                              (!m.confirmed && !m.prefixDadObserved && m.candidateUntil <= now);
                                    }),
                     mappings_.end());
     prefixes_.erase(
@@ -498,7 +499,11 @@ bool NearlinkIpShareIpv6::ProcessNd(const uint8_t *p, size_t n, size_t offset, b
                 other->conflict = true;
             }
         }
-        return true; // DAD records remain tentative, regardless of elapsed time.
+        // Authenticated DAD under an advertised /64 remains evidence until address validity ends.
+        // A quiet peer need not repeat DAD after 60s; only valid first data can confirm this record.
+        // Link-local and kernel-only candidates retain the short bounded admission timeout.
+        Find(target, terminal)->prefixDadObserved = !LinkLocal(target);
+        return true;
     }
     if (type == 136) {
         auto other = Find(Addr(p + offset + 8), !terminal);

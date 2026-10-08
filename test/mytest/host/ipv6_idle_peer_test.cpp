@@ -70,7 +70,21 @@ int main()
         assert(!send(Echo(address, remote), true, 1162)); // local tentative evidence is not wire DAD
         assert(send(Dad(Lla(2)), true, 1163));
         policy.Expire(1224);
-        assert(!send(Echo(Lla(2), Lla(1)), true, 1224)); // link-local candidate remains bounded
+        auto solicit = Packet(135, Lla(2), Lla(1), 24);
+        auto target = Lla(1);
+        std::copy(target.begin(), target.end(), solicit.begin() + 48);
+        Checksum(solicit);
+        assert(Policy::AddLayer2Option(solicit, terminalId));
+        assert(send(solicit, true, 1224)); // late NUD still sees the peer's DAD evidence
+        assert(!send(Echo(Lla(2), remote), true, 1224)); // link-local cannot escape onto the Internet
+        assert(send(Echo(Lla(2), Lla(1)), true, 1224)); // valid first local data, not elapsed time
+        policy.Reset();
+        assert(!send(solicit, true, 1225));
+        for (uint8_t i = 1; i <= 16; ++i) assert(send(Dad(Lla(i)), true, 1300));
+        policy.Expire(1400);
+        assert(!send(Dad(Lla(17)), true, 1400)); // retained tentative evidence remains capacity-bounded
+        policy.Reset();
+        assert(send(Dad(Lla(17)), true, 1401));
     }
     std::cout << "two_idle_peers=PASS (late echo, RA renewal, checksum/fragment/conflict/expiry/reset)\n";
 }

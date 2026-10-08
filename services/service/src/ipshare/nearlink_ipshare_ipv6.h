@@ -35,7 +35,7 @@ public:
         uint64_t preferredUntil{0};
         uint64_t validUntil{0};
         uint64_t kernelUntil{0};
-        bool prefixDadObserved{false}; // wire DAD evidence for a valid advertised /64; not confirmation
+        bool wireDadObserved{false}; // authenticated wire DAD evidence; not confirmation
     };
     struct Prefix {
         Address address{};

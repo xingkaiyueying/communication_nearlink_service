@@ -131,11 +131,13 @@ void NearlinkIpShareTun::Close()
         fd = fd_;
         fd_ = -1;
     }
-    if (fd >= 0) {
-        (void)close(fd);
-    }
     if (reader_.joinable()) {
         reader_.join();
+    }
+    // The reader can still hold this descriptor in poll/read. Keep it alive
+    // until the nonblocking reader exits, avoiding EBADF and descriptor reuse.
+    if (fd >= 0) {
+        (void)close(fd);
     }
     std::lock_guard<std::mutex> lock(mutex_);
     callback_ = nullptr;
@@ -214,6 +216,9 @@ void NearlinkIpShareTun::ReadLoop()
         }
         struct pollfd pollFd = {.fd = fd, .events = POLLIN, .revents = 0};
         int pollResult = poll(&pollFd, 1, 200);
+        if (!running_.load()) {
+            break;
+        }
         if (pollResult < 0) {
             HILOGE("[DHCP][IpShare][Tun] poll failed errno=%{public}d", errno);
             continue;

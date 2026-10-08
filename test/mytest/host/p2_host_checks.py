@@ -58,3 +58,4 @@ with tempfile.TemporaryDirectory(prefix='p2-s1-') as tmp:
     from probe_syntax import check_probe
     check_probe(a.cxx, repo, syntax / 'probe')
     print('native_probe_host_syntax=PASS (Linux/token SDK boundary stubbed)', flush=True)
+    subprocess.run([__import__('sys').executable, str(here / 'tun_close_host_check.py'), a.cxx], check=True)

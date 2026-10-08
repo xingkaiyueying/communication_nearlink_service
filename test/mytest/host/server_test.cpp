@@ -4,8 +4,10 @@
 static int prepared, rolledBack, notified;
 static bool secure = true, reserveFails;
 static uint8_t reserved;
+static bool draining;
 static int Prepare(const uint8_t *, uint8_t mode, uint64_t generation)
-{ assert(generation == 55); if (!mode) ++rolledBack; else ++prepared; reserved=mode; return reserveFails ? -1 : 0; }
+{ assert(generation == 55); if (!mode) ++rolledBack; else ++prepared; reserved=mode;
+  return draining ? IPOSL_ERR_PEER_DRAINING : (reserveFails ? -1 : 0); }
 static bool Secure(const uint8_t *, uint64_t generation) { return secure && generation == 55; }
 static bool SecureTyped(const uint8_t *, uint8_t type, uint64_t generation) { return secure && type == 0 && generation == 55; }
 static void Configured(const uint8_t *,bool,int32_t,uint8_t mode,uint64_t)
@@ -39,6 +41,14 @@ int main()
     assert(IposlServerStartAny(3,1,55)==0);
     request.param.len=11; IposlCodecEncodeConfigMode(peer,3,bytes,11);
     OnCallMethod(7,12,&request,true,false); assert(wireResult==0 && g_peers[0].used);
+    int notifiedBefore = notified;
+    draining=true;
+    OnCallMethod(7,120,&request,true,false);
+    assert(wireResult==0xfe && notified==notifiedBefore && g_peers[0].used);
+    request.param.len=7; IposlCodecEncodeOpenRequest(peer,bytes,11);
+    OnCallMethod(7,121,&request,true,false);
+    assert(wireResult==0xfe && !g_peers[0].enabled && notified==notifiedBefore);
+    draining=false; request.param.len=11; IposlCodecEncodeConfigMode(peer,3,bytes,11);
     uint8_t second[6]={2,1,2,3,4,6};
     memcpy(request.addr.addr,second,6); IposlCodecEncodeConfigMode(second,3,bytes,11);
     OnCallMethod(7,13,&request,true,false); assert(wireResult==255);

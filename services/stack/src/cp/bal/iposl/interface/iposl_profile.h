@@ -44,6 +44,8 @@ enum {
     IPOSL_ERR_INVALID_STATE = -2,
     IPOSL_ERR_SSAP = -3,
     IPOSL_ERR_NOT_SUPPORTED = -4,
+    /* Private Demo response 0xfe: previous peer session is still draining. */
+    IPOSL_ERR_PEER_DRAINING = -6,
 };
 
 typedef struct IposlProfileCallbacks {

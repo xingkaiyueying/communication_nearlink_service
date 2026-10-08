@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import os
 
 p = argparse.ArgumentParser()
 p.add_argument('--cxx', default='g++')
@@ -25,6 +26,13 @@ with tempfile.TemporaryDirectory(prefix='p2-s1-') as tmp:
                    repo / 'ipc_parcel/parcel/nearlink_ipshare_status.cpp',
                    repo / 'ipc_parcel/interface/nearlink_service_ipc_interface_code.h']:
         shutil.copyfile(source, out / source.name)
+    before_ref = os.environ.get('P3_RESTART_BEFORE_REF')
+    if before_ref:
+        for name in ('iposl_server.c', 'iposl_client.c'):
+            relative = (profile / 'src' / name).relative_to(repo).as_posix()
+            payload = subprocess.check_output(['git', '-c', f'safe.directory={repo.as_posix()}',
+                '-C', str(repo), 'show', before_ref + ':' + relative])
+            (out / name).write_bytes(payload)
     # Codec is C in the stack, while the probe compiles as C++.
     subprocess.run([a.cc, '-std=c11', '-Wall', '-Wextra', '-Werror', '-I'+str(out),
                     '-c', str(out/'iposl_codec.c'), '-o', str(out/'codec.o')], check=True)

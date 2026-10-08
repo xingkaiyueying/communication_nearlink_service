@@ -70,4 +70,9 @@ int main()
     assert(IposlCodecGatewayModes(alternate,sizeof(alternate),&modes) && modes == 3);
     alternate[3] = 1; assert(!IposlCodecGatewayModes(alternate,sizeof(alternate),&modes));
     for (size_t n = 0; n < sizeof(alternate); ++n) assert(!IposlCodecGatewayModes(alternate,n,&modes));
+    Discover(); Capability(3); before=methodCalls;
+    int oldRollbacks=rollbacks;
+    Response(1,0xfe);
+    assert(methodCalls==before && g_selectedMode==3 && !g_retried && rollbacks==oldRollbacks);
+    assert(g_clientAppId==-1 && failures==8); // busy never downgrades the requested mode
 }

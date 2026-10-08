@@ -203,7 +203,11 @@ static void OnCallMethodAny(int32_t appId, uint16_t requestId,
     if (accepted && opcode == IPOSL_OPCODE_CONFIGURE &&
         (mode == 1 || (mode == 3 && g_allowedMode == 3))) {
         if (entry != NULL) {
-            result = entry->mode == mode ? 0 : 0xff;
+            /* The cached SSAP entry outlives channel release and L3 cleanup.
+             * Revalidate its owner before acknowledging a retransmission. */
+            int32_t prepared = callbacks->prepareMode(method->addr.addr, mode, g_generation);
+            result = prepared == IPOSL_ERR_PEER_DRAINING ? 0xfe :
+                (prepared == 0 && entry->mode == mode ? 0 : 0xff);
         } else if ((candidate = FreePeer()) != NULL &&
             callbacks->prepareMode(method->addr.addr, mode, g_generation) == 0) {
             reserved = true;
@@ -211,7 +215,8 @@ static void OnCallMethodAny(int32_t appId, uint16_t requestId,
         }
     } else if (accepted && opcode == IPOSL_OPCODE_ENABLE && entry != NULL &&
         memcmp(entry->layer2, layer2, IPOSL_LAYER2_ID_LEN) == 0) {
-        result = 0;
+        int32_t prepared = callbacks->prepareMode(method->addr.addr, entry->mode, g_generation);
+        result = prepared == IPOSL_ERR_PEER_DRAINING ? 0xfe : (prepared == 0 ? 0 : 0xff);
     }
     bool delivered = false;
     if (method != NULL && needReturn &&

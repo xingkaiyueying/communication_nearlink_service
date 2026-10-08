@@ -970,8 +970,10 @@ int32_t NearlinkIpShareService::PrepareMode(const uint8_t peer[6], uint8_t mode,
             (mode != 0 && mode != 1 && mode != 3) ||
             (mode == 3 && service.status_.requestedMode != NearlinkIpShareMode::DUAL_STACK)) return -1;
         auto *existing = service.FindGatewayPeerLocked(peer);
-        if (existing != nullptr)
-            return !existing->releasing && existing->selectedMode == mode ? 0 : -1;
+        if (existing != nullptr) {
+            if (existing->releasing) return IPOSL_ERR_PEER_DRAINING;
+            return existing->selectedMode == mode ? 0 : -1;
+        }
         size_t slot = 0;
         while (slot < service.gatewayPeers_.size() && service.gatewayPeers_[slot] != nullptr) ++slot;
         if (slot == service.gatewayPeers_.size()) return -1;

@@ -141,6 +141,7 @@ int main()
     auto oldEpoch = s.gatewayPeers_[0]->epoch;
     firstRsp.status=QOSM_TRANS_CHANNEL_RELEASED; c.HandleChannelStatus(&firstRsp); DrainTasks();
     assert(s.gatewayPeers_[0] && s.gatewayPeers_[0]->releasing);
+    assert(profileCallbacks.prepareMode(peer,1,gatewayGen)==IPOSL_ERR_PEER_DRAINING);
     assert(profileCallbacks.prepareMode(second,1,gatewayGen)!=0); // still occupied until L3 cleanup
     assert(s.CompleteGatewayPeerRelease(oldEpoch+1)!=0);
     assert(s.CompleteGatewayPeerRelease(oldEpoch)==0); DrainTasks();

@@ -90,6 +90,7 @@ struct NearlinkIpSharePeerLink {
     int32_t selectedMode{0};
     std::string ifaceName;
     bool releasing{false};
+    bool active{true}; // False while the IP seat is reserved and its channel is being configured.
 };
 
 class NearlinkIpShareStatus final : public Parcelable {

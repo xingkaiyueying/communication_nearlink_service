@@ -25,7 +25,7 @@ bool WritePeerLinks(Parcel &p, const std::vector<NearlinkIpSharePeerLink> &links
         return false;
     for (const auto &link : links) {
         if (!p.WriteUint32(link.slot) || !p.WriteUint64(link.generation) || !p.WriteInt32(link.selectedMode) ||
-            !p.WriteString(link.ifaceName) || !p.WriteBool(link.releasing))
+            !p.WriteString(link.ifaceName) || !p.WriteBool(link.releasing) || !p.WriteBool(link.active))
             return false;
     }
     return true;
@@ -118,7 +118,7 @@ bool NearlinkIpShareStatus::ReadFromParcel(Parcel &parcel)
         NearlinkIpSharePeerLink link;
         if (!parcel.ReadUint32(link.slot) || !parcel.ReadUint64(link.generation) ||
             !parcel.ReadInt32(link.selectedMode) || !parcel.ReadString(link.ifaceName) ||
-            !parcel.ReadBool(link.releasing))
+            !parcel.ReadBool(link.releasing) || !parcel.ReadBool(link.active))
             return false;
         value.peerLinks.push_back(link);
     }

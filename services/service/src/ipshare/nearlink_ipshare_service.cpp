@@ -776,9 +776,9 @@ void NearlinkIpShareService::RefreshPeerLinksLocked()
         return;
     for (size_t slot = 0; slot < gatewayPeers_.size(); ++slot) {
         const auto &entry = gatewayPeers_[slot];
-        if (entry && (entry->active || entry->releasing)) {
+        if (entry) {
             status_.peerLinks.push_back({static_cast<uint32_t>(slot), entry->epoch, entry->selectedMode,
-                                         "sleip" + std::to_string(slot), entry->releasing});
+                                         "sleip" + std::to_string(slot), entry->releasing, entry->active});
         }
     }
     status_.ifaceName = status_.peerLinks.empty() ? "" : status_.peerLinks.front().ifaceName;
@@ -964,7 +964,7 @@ int32_t NearlinkIpShareService::PrepareMode(const uint8_t peer[6], uint8_t mode,
         return 0;
     }
     if (service.gatewayAny_) {
-        std::lock_guard<std::mutex> lock(service.mutex_);
+        std::unique_lock<std::mutex> lock(service.mutex_);
         if (generation != service.status_.generation ||
             service.status_.state == NearlinkIpShareState::STOPPING ||
             (mode != 0 && mode != 1 && mode != 3) ||
@@ -1001,6 +1001,11 @@ int32_t NearlinkIpShareService::PrepareMode(const uint8_t peer[6], uint8_t mode,
         }
         entry->selectedMode = mode;
         service.gatewayPeers_[slot] = std::move(entry);
+        service.StampLocked();
+        auto snapshot = service.status_;
+        auto observer = service.observer_;
+        lock.unlock();
+        service.NotifyStatus(snapshot, observer);
         return 0;
     }
     std::lock_guard<std::mutex> lock(service.mutex_);

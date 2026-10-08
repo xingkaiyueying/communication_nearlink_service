@@ -126,6 +126,8 @@ int main()
     uint64_t gatewayGen=status.generation;
     uint8_t second[6]={2,1,2,3,4,6};
     assert(profileCallbacks.prepareMode(peer,1,gatewayGen)==0);
+    s.GetStatus(status);
+    assert(status.peerLinks.size()==1 && !status.peerLinks[0].active && !status.peerLinks[0].releasing);
     assert(profileCallbacks.prepareMode(second,1,gatewayGen)!=0); // one atomic IP seat
     profileCallbacks.onConfigured(peer,false,0,1,gatewayGen);
     profileCallbacks.onConfigured(peer,true,0,1,gatewayGen); DrainTasks();
@@ -136,6 +138,7 @@ int main()
     firstRsp.lcid=13; firstRsp.tcid=4; firstRsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED;
     assert(c.HandleChannelStatus(&firstRsp)); DrainTasks();
     assert(s.gatewayPeers_[0]->active && firstChannel->CanSend(13,4,1,s.gatewayPeers_[0]->epoch));
+    s.GetStatus(status);assert(status.peerLinks[0].active);
     s.GetStatus(status); assert(status.state==NearlinkIpShareState::CHANNEL_READY &&
         status.ifaceName=="sleip0" && status.peerAddress.empty());
     auto oldEpoch = s.gatewayPeers_[0]->epoch;
@@ -177,6 +180,8 @@ int main()
         }
         uint8_t overflow[6]={2,1,2,3,4,99};
         assert(profileCallbacks.prepareMode(overflow,1,gatewayGen)!=0);
+        s.GetStatus(status);assert(status.peerLinks.size()==static_cast<size_t>(capacity));
+        for(const auto &link:status.peerLinks)assert(!link.active);
         assert(s.Stop()==0); DrainTasks(); s.GetStatus(status);
         assert(status.state==NearlinkIpShareState::IDLE);
     }

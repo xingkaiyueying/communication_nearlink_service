@@ -28,10 +28,11 @@ int main()
     assert(!value.Marshalling(bad));
     NearlinkIpShareStatus gateway;
     gateway.role=NearlinkIpShareRole::GATEWAY; gateway.requestedMode=NearlinkIpShareMode::DUAL_STACK;
-    gateway.peerLinks={{0,10,1,"sleip0",false},{1,11,3,"sleip1",true}};
+    gateway.peerLinks={{0,10,1,"sleip0",false,false},{1,11,3,"sleip1",true,true}};
     Parcel peers;assert(gateway.Marshalling(peers));
     NearlinkIpShareStatus peerCopy;assert(peerCopy.ReadFromParcel(peers));
     assert(peerCopy.peerLinks.size()==2 && peerCopy.peerLinks[1].releasing);
+    assert(!peerCopy.peerLinks[0].active && peerCopy.peerLinks[1].active);
     for(size_t n=0;n<peers.bytes.size();++n) {
         Parcel truncated;truncated.bytes.assign(peers.bytes.begin(),peers.bytes.begin()+n);
         NearlinkIpShareStatus target;assert(!target.ReadFromParcel(truncated));

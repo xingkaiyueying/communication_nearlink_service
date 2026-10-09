@@ -21,9 +21,10 @@ const IposlProfileCallbacks *IposlGetCallbacks(void);
 int32_t IposlServerInitialize(void);
 void IposlServerDeinit(void);
 int32_t IposlServerStartAny(uint8_t mode, uint32_t capacity, uint64_t generation);
-void IposlServerReleasePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType);
+int32_t IposlServerReleasePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType);
 int32_t IposlServerStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation);
 void IposlServerStop(void);
+bool IposlServerIsDrained(void);
 int32_t IposlClientStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, bool terminal,
     const uint8_t localLayer2[IPOSL_LAYER2_ID_LEN], uint8_t mode, uint64_t generation);
 void IposlClientStop(void);

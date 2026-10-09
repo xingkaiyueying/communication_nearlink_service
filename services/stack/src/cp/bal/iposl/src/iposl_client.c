@@ -146,13 +146,6 @@ static void OnCallMethod(int32_t appId, NLSTK_SsapClientCallMethodResult_S *resp
     bool validResponse = response != NULL && ret == NLSTK_ERRCODE_SUCCESS &&
         responseError == NLSTK_ERRCODE_SUCCESS && decodeRet == IPOSL_SUCCESS &&
         memcmp(layer2, g_localLayer2, sizeof(layer2)) == 0;
-    if (validResponse && result == 0xfe && callbacks != NULL &&
-        callbacks->isSecure(g_peer, g_generation)) {
-        /* Busy is a lifecycle condition, never a dual-stack capability failure. */
-        NotifyConfigured(false, IPOSL_ERR_PEER_DRAINING);
-        Finish(false);
-        return;
-    }
     if (validResponse && callbacks != NULL && IposlCodecMayFallback(g_expectedOpcode, g_selectedMode,
         result, g_retried, callbacks->isSecure(g_peer, g_generation))) {
         g_retried = true;

@@ -1,6 +1,35 @@
 #include <cassert>
+#include <deque>
+#include <tuple>
+#include <atomic>
+using atomic_int = std::atomic<int>;
+using atomic_uint = std::atomic<unsigned>;
+using atomic_bool = std::atomic<bool>;
+using atomic_uint_fast64_t = std::atomic<uint_fast64_t>;
+using std::atomic_init;
+using std::atomic_load;
+using std::atomic_store;
+using std::atomic_fetch_add;
+using std::atomic_fetch_sub;
 #include "iposl_codec.c"
 #include "iposl_server.c"
+static bool deferCp, failPost;
+static std::deque<std::tuple<void (*)(void *),void *,void (*)(void *)>> cpQueue;
+uint32_t CP_PostTaskBlocked(void (*callback)(void *), void *arg, void (*freeCallback)(void *), int)
+{
+    if (failPost) { if (freeCallback) freeCallback(arg); return 1; }
+    if (deferCp) { cpQueue.emplace_back(callback,arg,freeCallback);return 1; }
+    callback(arg);
+    if (freeCallback) freeCallback(arg);
+    return 0;
+}
+static void DrainCp()
+{
+    while (!cpQueue.empty()) {
+        auto [callback,arg,freeCallback]=cpQueue.front();cpQueue.pop_front();
+        callback(arg);if(freeCallback)freeCallback(arg);
+    }
+}
 static int prepared, rolledBack, notified;
 static bool secure = true, reserveFails;
 static uint8_t reserved;
@@ -34,7 +63,7 @@ int main()
     IposlServerStop(); assert(!g_enabled && !g_configured);
     assert(IposlServerStart(peer,0,1,55)==0);
     request.param.len=11; IposlCodecEncodeConfigMode(peer,3,bytes,11);
-    OnCallMethod(7,9,&request,true,false); assert(wireResult==255 && !g_configured);
+    OnCallMethod(7,9,&request,true,false); assert(wireResult==7 && !g_configured);
     bytes[10]=1; request.addr.addr[5]++; OnCallMethod(7,10,&request,true,false); assert(wireResult==255);
     request.addr.addr[5]--; OnCallMethod(7,11,&request,true,false); assert(wireResult==0 && g_selectedMode==1);
     IposlServerStop();
@@ -44,10 +73,10 @@ int main()
     int notifiedBefore = notified;
     draining=true;
     OnCallMethod(7,120,&request,true,false);
-    assert(wireResult==0xfe && notified==notifiedBefore && g_peers[0].used);
+    assert(wireResult==0xff && notified==notifiedBefore && g_peers[0].used);
     request.param.len=7; IposlCodecEncodeOpenRequest(peer,bytes,11);
     OnCallMethod(7,121,&request,true,false);
-    assert(wireResult==0xfe && !g_peers[0].enabled && notified==notifiedBefore);
+    assert(wireResult==0xff && !g_peers[0].enabled && notified==notifiedBefore);
     draining=false; request.param.len=11; IposlCodecEncodeConfigMode(peer,3,bytes,11);
     uint8_t second[6]={2,1,2,3,4,6};
     memcpy(request.addr.addr,second,6); IposlCodecEncodeConfigMode(second,3,bytes,11);
@@ -66,5 +95,17 @@ int main()
     uint8_t eighth[6]={2,1,2,3,4,99};
     memcpy(request.addr.addr,eighth,6); IposlCodecEncodeConfigMode(eighth,1,bytes,11);
     OnCallMethod(7,30,&request,true,false); assert(wireResult==255);
-    IposlServerDeinit();
+    deferCp=true;
+    IposlServerStop();assert(!IposlServerIsDrained() && g_peers!=nullptr);
+    DrainCp();assert(IposlServerIsDrained() && g_peers==nullptr);
+    assert(IposlServerStartAny(1,2,55)!=0);
+    DrainCp();assert(!g_serverActive && g_peers==nullptr); // cancelled late start
+    deferCp=false;IposlServerStop();
+    assert(IposlServerStartAny(1,2,55)==0);
+    memcpy(request.addr.addr,peer,6);IposlCodecEncodeConfigMode(peer,1,bytes,11);
+    OnCallMethod(7,31,&request,true,false);assert(g_peers[0].used);
+    failPost=true;assert(IposlServerReleasePeer(peer,0)!=0 && g_peers[0].used);failPost=false;
+    deferCp=true;assert(IposlServerReleasePeer(peer,0)!=0 && g_peers[0].used);
+    DrainCp();assert(!g_peers[0].used);
+    deferCp=false;IposlServerDeinit();
 }

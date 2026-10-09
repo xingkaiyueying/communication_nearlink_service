@@ -23,6 +23,12 @@
 #include "cm_dyn_trans_channel_api.h"
 
 static CM_DynTransChannelCbks_S g_channelCbks = { 0 };
+static CM_DynTransPeerCheck g_peerCheck;
+
+void CM_DynTransChannStateMgrRegPeerCheck(CM_DynTransPeerCheck callback)
+{
+    g_peerCheck = callback;
+}
 
 static uint32_t CM_DynTransChanActiveEstablishingReqHandler(uint8_t curState, const CM_DynTransChanParam_S *param,
     uint8_t nextState);
@@ -448,12 +454,15 @@ static uint32_t CM_DynTransChanPassiveReleasedReqHandler(uint8_t curState, const
 
 static bool CM_DynTransChannelEstablishedCheck(uint16_t lcid, uint16_t srcPort, uint16_t dstPort)
 {
+    if (g_peerCheck != NULL && !g_peerCheck(lcid, srcPort, dstPort)) {
+        return false;
+    }
     if (g_channelCbks.establishedCheckCbk == NULL) {
         CM_LOGW("establishedCheckCbk is null");
         return true;
     }
 
-    CM_DynTransChanEstablishedCheckParam_S param = { .lcid = lcid, .srcPort = srcPort, .dstPort = dstPort };
+    CM_DynTransChanEstablishedCheckParam_S param = { .srcPort = srcPort, .dstPort = dstPort };
     return g_channelCbks.establishedCheckCbk(&param);
 }
 

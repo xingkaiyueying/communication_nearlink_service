@@ -16,6 +16,10 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdatomic.h>
+
+#include "cp_worker.h"
+#include "sdf_mem.h"
 
 #include "iposl_codec.h"
 #include "nlstk_log.h"
@@ -43,7 +47,7 @@ static const uint8_t g_methodUuid[16] = {
     0x7A, 0xA3, 0x12, 0x0E, 0xF0, 0xD2, 0x45, 0x60, 0xB7, 0x11, 0xA5, 0xB6, 0x18, 0xB7, 0xA3, 0x2B
 };
 
-static int32_t g_serverAppId = SSAP_APP_INVALID_ID;
+static atomic_int g_serverAppId = SSAP_APP_INVALID_ID;
 static uint8_t g_expectedPeer[IPOSL_LAYER2_ID_LEN];
 static uint8_t g_expectedAddressType;
 static uint8_t g_configuredLayer2[IPOSL_LAYER2_ID_LEN];
@@ -206,8 +210,7 @@ static void OnCallMethodAny(int32_t appId, uint16_t requestId,
             /* The cached SSAP entry outlives channel release and L3 cleanup.
              * Revalidate its owner before acknowledging a retransmission. */
             int32_t prepared = callbacks->prepareMode(method->addr.addr, mode, g_generation);
-            result = prepared == IPOSL_ERR_PEER_DRAINING ? 0xfe :
-                (prepared == 0 && entry->mode == mode ? 0 : 0xff);
+            result = prepared == 0 && entry->mode == mode ? 0 : 0xff;
         } else if ((candidate = FreePeer()) != NULL &&
             callbacks->prepareMode(method->addr.addr, mode, g_generation) == 0) {
             reserved = true;
@@ -216,7 +219,10 @@ static void OnCallMethodAny(int32_t appId, uint16_t requestId,
     } else if (accepted && opcode == IPOSL_OPCODE_ENABLE && entry != NULL &&
         memcmp(entry->layer2, layer2, IPOSL_LAYER2_ID_LEN) == 0) {
         int32_t prepared = callbacks->prepareMode(method->addr.addr, entry->mode, g_generation);
-        result = prepared == IPOSL_ERR_PEER_DRAINING ? 0xfe : (prepared == 0 ? 0 : 0xff);
+        result = prepared == 0 ? 0 : 0xff;
+    }
+    if (accepted && opcode == IPOSL_OPCODE_CONFIGURE && mode == 3 && g_allowedMode != 3) {
+        result = 0x07; // Explicit IP-type rejection, never capacity or identity rejection.
     }
     bool delivered = false;
     if (method != NULL && needReturn &&
@@ -291,6 +297,10 @@ static void OnCallMethod(int32_t appId, uint16_t requestId, NLSTK_SsapServerCall
         memcmp(g_configuredLayer2, layer2, sizeof(g_configuredLayer2)) == 0) {
         result = 0;
     }
+    if (accepted && opcode == IPOSL_OPCODE_CONFIGURE &&
+        memcmp(layer2, g_expectedPeer, sizeof(g_expectedPeer)) == 0 && mode == 3 && g_allowedMode != 3) {
+        result = 0x07;
+    }
     bool delivered = false;
     if (method != NULL && IposlCodecEncodeResponse(opcode, layer2, result, response, sizeof(response)) > 0 &&
         needReturn) {
@@ -327,7 +337,9 @@ int32_t IposlServerInitialize(void)
     NLSTK_SsapAppServerCb_S callbacks = {0};
     callbacks.onCallMethod = OnCallMethod;
     callbacks.onReadPropertyAuthorizeRequest = OnReadPropertyAuthorize;
-    NLSTK_Errcode_E registerRet = NLSTK_SsapServerRegApp(&callbacks, &g_serverAppId);
+    int32_t appId = SSAP_APP_INVALID_ID;
+    NLSTK_Errcode_E registerRet = NLSTK_SsapServerRegApp(&callbacks, &appId);
+    g_serverAppId = appId;
     if (registerRet != NLSTK_ERRCODE_SUCCESS || g_serverAppId == SSAP_APP_INVALID_ID) {
         g_serverAppId = SSAP_APP_INVALID_ID;
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Server] register failed ret=%d", registerRet);
@@ -343,7 +355,7 @@ int32_t IposlServerInitialize(void)
     return IPOSL_SUCCESS;
 }
 
-int32_t IposlServerStartAny(uint8_t mode, uint32_t capacity, uint64_t generation)
+static int32_t StartAnyOnCp(uint8_t mode, uint32_t capacity, uint64_t generation)
 {
     const IposlProfileCallbacks *callbacks = IposlGetCallbacks();
     if (callbacks == NULL || callbacks->isSecureAddress == NULL ||
@@ -361,7 +373,7 @@ int32_t IposlServerStartAny(uint8_t mode, uint32_t capacity, uint64_t generation
     return IPOSL_SUCCESS;
 }
 
-void IposlServerReleasePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
+static void ReleasePeerOnCp(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
 {
     if (peer == NULL || !g_anyPeer) return;
     SLE_Addr_S addr = {0};
@@ -371,7 +383,8 @@ void IposlServerReleasePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t add
     if (entry != NULL) memset(entry, 0, sizeof(*entry));
 }
 
-int32_t IposlServerStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation)
+static int32_t StartOnCp(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType,
+    uint8_t mode, uint64_t generation)
 {
     if (peer == NULL || g_serverAppId == SSAP_APP_INVALID_ID || g_serverActive) {
         NLSTK_LOG_ERROR("[IpShare][IPoSL][Server] start rejected peerNull=%d appId=%d active=%d", peer == NULL,
@@ -390,7 +403,7 @@ int32_t IposlServerStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addres
     return IPOSL_SUCCESS;
 }
 
-void IposlServerStop(void)
+static void StopOnCp(void)
 {
     bool wasActive = g_serverActive;
     (void)memset(g_expectedPeer, 0, sizeof(g_expectedPeer));
@@ -406,6 +419,140 @@ void IposlServerStop(void)
     g_peerCapacity = 0;
     g_anyPeer = false;
     NLSTK_LOG_INFO("[IpShare][IPoSL][Server] stop completed wasActive=%d", wasActive);
+}
+
+typedef enum {
+    SERVER_START,
+    SERVER_START_ANY,
+    SERVER_RELEASE_PEER,
+    SERVER_STOP
+} IposlServerOperation;
+
+typedef struct {
+    atomic_int refs;
+    atomic_bool cancelled;
+    IposlServerOperation operation;
+    uint8_t peer[IPOSL_LAYER2_ID_LEN];
+    uint8_t addressType;
+    uint8_t mode;
+    uint32_t capacity;
+    uint64_t generation;
+    int32_t result;
+} IposlServerTask;
+
+static atomic_uint g_serverTasks;
+static atomic_bool g_serverDrained = true;
+static atomic_uint_fast64_t g_publishedGeneration;
+
+static void ReleaseServerTask(void *arg)
+{
+    IposlServerTask *task = (IposlServerTask *)arg;
+    if (atomic_fetch_sub(&task->refs, 1) == 1) {
+        SDF_MemFree(task);
+    }
+}
+
+static void FinishServerTask(void *arg)
+{
+    atomic_fetch_sub(&g_serverTasks, 1);
+    ReleaseServerTask(arg);
+}
+
+static void RunServerTask(void *arg)
+{
+    IposlServerTask *task = (IposlServerTask *)arg;
+    // A timed-out stop must still run: only CP may free the peer table.
+    if ((task->operation == SERVER_START || task->operation == SERVER_START_ANY) &&
+        atomic_load(&task->cancelled)) {
+        return;
+    }
+    switch (task->operation) {
+        case SERVER_START:
+            task->result = StartOnCp(task->peer, task->addressType, task->mode, task->generation);
+            break;
+        case SERVER_START_ANY:
+            task->result = StartAnyOnCp(task->mode, task->capacity, task->generation);
+            break;
+        case SERVER_RELEASE_PEER:
+            if (task->generation == g_generation) {
+                ReleasePeerOnCp(task->peer, task->addressType);
+            }
+            task->result = IPOSL_SUCCESS;
+            break;
+        case SERVER_STOP:
+            StopOnCp();
+            atomic_store(&g_serverDrained, true);
+            task->result = IPOSL_SUCCESS;
+            break;
+    }
+}
+
+static int32_t PostServerTask(IposlServerOperation operation, const uint8_t *peer,
+    uint8_t addressType, uint8_t mode, uint32_t capacity, uint64_t generation)
+{
+    if (operation == SERVER_START || operation == SERVER_START_ANY || operation == SERVER_STOP) {
+        atomic_store(&g_serverDrained, false);
+    }
+    IposlServerTask *task = (IposlServerTask *)SDF_MemAlloc(sizeof(*task));
+    if (task == NULL) {
+        return IPOSL_ERR_INVALID_STATE;
+    }
+    atomic_init(&task->refs, 2);
+    atomic_init(&task->cancelled, false);
+    task->operation = operation;
+    task->addressType = addressType;
+    task->mode = mode;
+    task->capacity = capacity;
+    task->generation = generation;
+    task->result = IPOSL_ERR_INVALID_STATE;
+    if (peer != NULL) {
+        memcpy(task->peer, peer, sizeof(task->peer));
+    }
+    atomic_fetch_add(&g_serverTasks, 1);
+    uint32_t posted = CP_PostTaskBlocked(RunServerTask, task, FinishServerTask, 500);
+    int32_t result = IPOSL_ERR_INVALID_STATE;
+    if (posted == 0) {
+        result = task->result;
+    } else {
+        atomic_store(&task->cancelled, true);
+    }
+    ReleaseServerTask(task);
+    return result;
+}
+
+int32_t IposlServerStartAny(uint8_t mode, uint32_t capacity, uint64_t generation)
+{
+    atomic_store(&g_publishedGeneration, generation);
+    return PostServerTask(SERVER_START_ANY, NULL, 0, mode, capacity, generation);
+}
+
+int32_t IposlServerStart(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType,
+    uint8_t mode, uint64_t generation)
+{
+    if (peer == NULL) {
+        return IPOSL_ERR_INVALID_PARAM;
+    }
+    atomic_store(&g_publishedGeneration, generation);
+    return PostServerTask(SERVER_START, peer, addressType, mode, 0, generation);
+}
+
+int32_t IposlServerReleasePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
+{
+    if (peer != NULL) {
+        return PostServerTask(SERVER_RELEASE_PEER, peer, addressType, 0, 0,
+            atomic_load(&g_publishedGeneration));
+    }
+    return IPOSL_ERR_INVALID_PARAM;
+}
+
+void IposlServerStop(void)
+{
+    (void)PostServerTask(SERVER_STOP, NULL, 0, 0, 0, 0);
+}
+
+bool IposlServerIsDrained(void)
+{
+    return atomic_load(&g_serverDrained) && atomic_load(&g_serverTasks) == 0;
 }
 
 void IposlServerDeinit(void)

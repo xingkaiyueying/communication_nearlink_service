@@ -204,10 +204,13 @@ typedef struct {
 } CM_DynTransChanStatusIndicationRsp_S;
 
 typedef struct {
-    uint16_t lcid;
     uint16_t srcPort;
     uint16_t dstPort;
 } CM_DynTransChanEstablishedCheckParam_S;
+
+// Internal peer-aware hook; the legacy callback parameter layout stays unchanged.
+typedef bool (*CM_DynTransPeerCheck)(uint16_t lcid, uint16_t srcPort, uint16_t dstPort);
+void CM_DynTransChannStateMgrRegPeerCheck(CM_DynTransPeerCheck callback);
 
 /**
  * @brief  动态传输通道主动创建响应回调函数

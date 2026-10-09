@@ -1216,10 +1216,14 @@ void SleDataTransferService::SendDataStateCallback(const SLE_Addr_S *devAddr, ui
     });
 }
 
-bool SleDataTransferService::CheckChannelParamCallback(const SLE_Addr_S *addr, uint16_t srcPort)
+bool SleDataTransferService::CheckIpSharePeerCallback(const SLE_Addr_S *addr, uint16_t srcPort)
+{
+    return NearlinkIpShareChannel::IsAcceptingPort(addr, srcPort);
+}
+
+bool SleDataTransferService::CheckChannelParamCallback(uint16_t srcPort)
 {
     if (NearlinkIpShareChannel::IsIpSharePort(srcPort)) {
-        if (!NearlinkIpShareChannel::IsAcceptingPort(addr, srcPort)) return false;
         HILOGI("[IpShare][DataTransfer] accepted IPoSL QoSM channel port=%{public}u", srcPort);
         return true;
     }
@@ -1362,6 +1366,9 @@ int SleDataTransferService::RegisterSleDataTransferCallbackToStack()
     transChannelCbks.establishedCheck = &SleDataTransferService::CheckChannelParamCallback;
     ret = QOSM_TransChannelCbksRegister(&transChannelCbks);
     HILOGI("DT stack channel cb ret=0x%{public}x", ret);
+    if (ret == 0) {
+        ret = QOSM_RegisterIpSharePeerCheck(&SleDataTransferService::CheckIpSharePeerCallback);
+    }
     return ret;
 }
 

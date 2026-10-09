@@ -95,6 +95,7 @@ private:
     uint64_t generationCounter_ {0};
     void StopNow();
 
+    std::mutex lifecycleMutex_;
     mutable std::mutex mutex_;
     std::condition_variable probeCondition_;
     NearlinkIpShareStatus status_;

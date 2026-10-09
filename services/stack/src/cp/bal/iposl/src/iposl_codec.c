@@ -149,8 +149,8 @@ uint8_t IposlCodecSelectMode(uint8_t requested, uint8_t peerModes)
 
 bool IposlCodecMayFallback(uint8_t opcode, uint8_t mode, uint8_t result, bool alreadyRetried, bool secure)
 {
-    /* Only a decoded explicit CONFIGURE rejection; never an SSAP/security/transport error. */
-    return opcode == 1 && mode == 3 && result != 0 && (result <= 7 || result == 0xff) &&
+    /* Only explicit IP-type rejection; generic/capacity/security failures are not retryable. */
+    return opcode == IPOSL_OPCODE_CONFIGURE && mode == IPOSL_IP_TYPE_DUAL_STACK && result == 0x07 &&
         !alreadyRetried && secure;
 }
 

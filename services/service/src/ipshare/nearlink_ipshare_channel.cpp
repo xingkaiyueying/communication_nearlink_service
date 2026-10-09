@@ -528,17 +528,23 @@ bool NearlinkIpShareChannel::ConsumeStatus(const QOSM_TransChannelRspParams_S *p
             return false;
         }
         if (params->status == QOSM_TRANS_CHANNEL_ESTABLISHED) {
-            if (params->mtu < IPOSL_MTU) {
-                channelPending_ = false;
-                release.addr = params->addr;
-                release.tcid = params->tcid;
-                destroy = true;
-                if (active_) { callback = callback_; error = -1; }
-            } else if (channelEstablished_ && (lcid_ != params->lcid || tcid_ != params->tcid)) {
+            if ((channelEstablished_ || releasing_) && (lcid_ != params->lcid || tcid_ != params->tcid)) {
                 // An unrelated success must never replace the current channel.
                 release.addr = params->addr;
                 release.tcid = params->tcid;
                 destroy = true;
+            } else if (params->mtu < IPOSL_MTU) {
+                channelPending_ = false;
+                lcid_ = params->lcid;
+                tcid_ = params->tcid;
+                releasing_ = true;
+                release.addr = params->addr;
+                release.tcid = params->tcid;
+                destroy = true;
+                if (active_) {
+                    callback = callback_;
+                    error = -1;
+                }
             } else {
                 channelPending_ = false;
                 lcid_ = params->lcid;

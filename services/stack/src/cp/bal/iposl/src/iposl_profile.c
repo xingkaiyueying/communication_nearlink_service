@@ -24,7 +24,8 @@
 #include "nlstk_log.h"
 
 static IposlProfileCallbacks g_callbacks;
-static bool g_initialized;
+static atomic_bool g_initialized;
+static bool g_callbacksInstalled;
 static atomic_uint_fast64_t g_sendGeneration;
 
 const IposlProfileCallbacks *IposlGetCallbacks(void)
@@ -44,15 +45,23 @@ int32_t IposlProfileInit(const IposlProfileCallbacks *callbacks)
         NLSTK_LOG_ERROR("[IpShare][IPoSL] profile init failed: codec golden vectors");
         return IPOSL_ERR_INVALID_STATE;
     }
-    g_callbacks = *callbacks;
-    g_initialized = true;
+    if (!g_callbacksInstalled) {
+        g_callbacks = *callbacks;
+        g_callbacksInstalled = true;
+    } else if (g_callbacks.onPeerSupported != callbacks->onPeerSupported ||
+        g_callbacks.onConfigured != callbacks->onConfigured || g_callbacks.prepareMode != callbacks->prepareMode ||
+        g_callbacks.isSecure != callbacks->isSecure || g_callbacks.canSend != callbacks->canSend ||
+        g_callbacks.onPeerCapabilities != callbacks->onPeerCapabilities ||
+        g_callbacks.isSecureAddress != callbacks->isSecureAddress) {
+        return IPOSL_ERR_INVALID_STATE;
+    }
     int32_t ret = IposlServerInitialize();
     if (ret != IPOSL_SUCCESS) {
-        (void)memset(&g_callbacks, 0, sizeof(g_callbacks));
         g_initialized = false;
         NLSTK_LOG_ERROR("[IpShare][IPoSL] profile init failed: server init ret=%d", ret);
         return IPOSL_ERR_SSAP;
     }
+    g_initialized = true;
     NLSTK_LOG_INFO("[IpShare][IPoSL] profile init completed pi=%u", DTAP_PI_IPV4);
     return IPOSL_SUCCESS;
 }
@@ -60,11 +69,10 @@ int32_t IposlProfileInit(const IposlProfileCallbacks *callbacks)
 void IposlProfileDeinit(void)
 {
     NLSTK_LOG_INFO("[IpShare][IPoSL] profile deinit started");
+    g_initialized = false;
     atomic_store(&g_sendGeneration, 0);
     IposlClientStop();
     IposlServerDeinit();
-    (void)memset(&g_callbacks, 0, sizeof(g_callbacks));
-    g_initialized = false;
     NLSTK_LOG_INFO("[IpShare][IPoSL] profile deinit completed");
 }
 
@@ -78,7 +86,12 @@ int32_t IposlProfileStartServerAny(uint8_t mode, uint32_t capacity, uint64_t gen
 
 void IposlProfileReleaseServerPeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
 {
-    IposlServerReleasePeer(peer, addressType);
+    (void)IposlServerReleasePeer(peer, addressType);
+}
+
+int32_t IposlProfileReleaseServerPeerChecked(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType)
+{
+    return IposlServerReleasePeer(peer, addressType);
 }
 
 int32_t IposlProfileStartServer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation)
@@ -102,6 +115,11 @@ void IposlProfileStopServer(void)
     atomic_store(&g_sendGeneration, 0);
     IposlServerStop();
     NLSTK_LOG_INFO("[IpShare][IPoSL] server stopped");
+}
+
+bool IposlProfileServerIsDrained(void)
+{
+    return IposlServerIsDrained();
 }
 
 int32_t IposlProfileProbePeer(const uint8_t peer[IPOSL_LAYER2_ID_LEN], uint8_t addressType, uint8_t mode, uint64_t generation)

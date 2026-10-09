@@ -19,6 +19,7 @@
 #include <mutex>
 
 #include "i_nearlink_host.h"
+#include "i_nearlink_ipshare.h"
 #include "nearlink_host.h"
 #include "log.h"
 #include "iservice_registry.h"
@@ -77,11 +78,6 @@ sptr<IRemoteObject> NearlinkSaManager::GetRemoteHost()
     NL_CHECK_RETURN_RET(samgrProxy, nullptr, "samgrProxy is nullptr.");
 
     remote = samgrProxy->CheckSystemAbility(NEARLINK_HOST_SYS_ABILITY_ID);
-    if (remote == nullptr) {
-        // The host SA may have been unloaded after boot. CheckSystemAbility does
-        // not start an on-demand SA, so load it for a new IP share request.
-        remote = samgrProxy->GetSystemAbility(NEARLINK_HOST_SYS_ABILITY_ID);
-    }
     NL_CHECK_RETURN_RET(remote, nullptr, "remote is nullptr.");
 
     return remote;
@@ -95,6 +91,11 @@ sptr<IRemoteObject> NearlinkSaManager::GetRemoteProfile(const std::string &profi
     }
 
     auto remoteHost = GetRemoteHost();
+    if (remoteHost == nullptr && profileName == PROFILE_IPSHARE_SERVER) {
+        auto samgrProxy = SystemAbilityManagerClient::GetInstance().GetSystemAbilityManager();
+        NL_CHECK_RETURN_RET(samgrProxy, nullptr, "samgrProxy is nullptr.");
+        remoteHost = samgrProxy->GetSystemAbility(NEARLINK_HOST_SYS_ABILITY_ID);
+    }
     NL_CHECK_RETURN_RET(remoteHost, nullptr, "remoteHost is nullptr.");
     if (profileName == NEARLINK_HOST) {
         remote = remoteHost;

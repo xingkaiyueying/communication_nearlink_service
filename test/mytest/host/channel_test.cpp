@@ -14,8 +14,9 @@
 static int creates, destroys, tunWrites, sent;
 static uint8_t sentPi;
 static bool secure = true;
+static uint32_t destroyResult;
 extern "C" uint32_t QOSM_TransChannelCreate(const QOSM_TransChannelParams_S *) { ++creates; return 0; }
-extern "C" uint32_t QOSM_TransChannelDestroy(const QOSM_TransChannelReleaseParams_S *) { ++destroys; return 0; }
+extern "C" uint32_t QOSM_TransChannelDestroy(const QOSM_TransChannelReleaseParams_S *) { ++destroys; return destroyResult; }
 extern "C" int32_t IposlProfileSendIp(uint16_t lcid, uint8_t tcid, uint8_t pi, const uint8_t *, uint16_t, uint64_t gen)
 {
     if (!OHOS::Nearlink::NearlinkIpShareService::CanSend(lcid, tcid, pi, gen)) return -1;
@@ -150,5 +151,21 @@ int main()
     assert(c.SetPeer(peer,0,true,peer,local,12) == 0 && c.PrepareMode(3) == 0);
     assert(c.PrepareMode(0) == 0 && !registered[1] && !registered[2]);
     assert(c.PrepareMode(1) == 0 && !registered[2]); // explicit fallback resource rollback
-    c.Close(); c.Deinitialize();
+    c.Close();
+    assert(c.SetPeer(peer,0,true,peer,local,13)==0 && c.PrepareMode(1)==0);
+    assert(c.CreateTun()==0 && c.EnableMode(1)==0 && c.Open(peer,0)==0);
+    rsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED; rsp.mtu=1499; rsp.lcid=20; rsp.tcid=21;
+    destroyResult=1;
+    c.HandleChannelStatus(&rsp);
+    assert(c.releasing_ && c.lcid_==20 && c.tcid_==21 && !c.IsDrained());
+    auto unrelated=rsp;unrelated.tcid=22;
+    c.HandleChannelStatus(&unrelated);
+    assert(c.lcid_==20 && c.tcid_==21 && c.releasing_);
+    c.Close();assert(!c.IsDrained());
+    rsp.status=QOSM_TRANS_CHANNEL_RELEASE_FAIL;c.HandleChannelStatus(&rsp);
+    assert(c.releasing_ && !c.IsDrained());
+    destroyResult=0;c.Close();assert(!c.IsDrained());
+    rsp.status=QOSM_TRANS_CHANNEL_RELEASED;c.HandleChannelStatus(&rsp);
+    assert(c.IsDrained());
+    c.Deinitialize();
 }

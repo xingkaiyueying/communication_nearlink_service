@@ -18,10 +18,13 @@ using namespace OHOS::Nearlink;
 static IposlProfileCallbacks profileCallbacks;
 static uint64_t profileGeneration;
 static int starts, writes;
+static bool serverDrained=true;
 extern "C" int32_t IposlProfileInit(const IposlProfileCallbacks *c) { profileCallbacks=*c; return 0; }
 extern "C" void IposlProfileDeinit() {}
 extern "C" void IposlProfileStopClient() {}
 extern "C" void IposlProfileStopServer() {}
+extern "C" bool IposlProfileServerIsDrained() { return serverDrained; }
+extern "C" int32_t IposlProfileReleaseServerPeerChecked(const uint8_t *,uint8_t) { return 0; }
 extern "C" int32_t IposlProfileStartServerAny(uint8_t,uint32_t,uint64_t g) { profileGeneration=g; ++starts; return 0; }
 extern "C" void IposlProfileReleaseServerPeer(const uint8_t *,uint8_t) {}
 extern "C" int32_t IposlProfileStartServer(const uint8_t *,uint8_t,uint8_t,uint64_t g) { profileGeneration=g; ++starts; return 0; }
@@ -138,6 +141,8 @@ int main()
     firstRsp.lcid=13; firstRsp.tcid=4; firstRsp.status=QOSM_TRANS_CHANNEL_ESTABLISHED;
     assert(c.HandleChannelStatus(&firstRsp)); DrainTasks();
     assert(s.gatewayPeers_[0]->active && firstChannel->CanSend(13,4,1,s.gatewayPeers_[0]->epoch));
+    assert(s.CanSend(13,4,1,s.gatewayPeers_[0]->epoch));
+    assert(!s.CanSend(13,4,1,s.gatewayPeers_[0]->epoch+100));
     s.GetStatus(status);assert(status.peerLinks[0].active);
     s.GetStatus(status); assert(status.state==NearlinkIpShareState::CHANNEL_READY &&
         status.ifaceName=="sleip0" && status.peerAddress.empty());
@@ -185,5 +190,18 @@ int main()
         assert(s.Stop()==0); DrainTasks(); s.GetStatus(status);
         assert(status.state==NearlinkIpShareState::IDLE);
     }
+    OHOS::system::mockMaxTerminals=2;
+    assert(s.StartGatewayAny(1,2)==0);DrainTasks();s.GetStatus(status);gatewayGen=status.generation;
+    assert(profileCallbacks.prepareMode(peer,1,gatewayGen)==0);
+    auto epoch=s.gatewayPeers_[0]->epoch;
+    std::atomic<bool> sending{true};
+    std::thread cpSender([&]() {while(sending) (void)s.CanSend(1,2,1,epoch);});
+    s.OnPeerDisconnected(address);DrainTasks();
+    assert(s.CompleteGatewayPeerRelease(epoch)==0);DrainTasks();
+    serverDrained=false;assert(s.Stop()==0);DrainTasks();s.GetStatus(status);
+    assert(status.state==NearlinkIpShareState::STOPPING);
+    serverDrained=true;assert(s.Stop()==0);DrainTasks();s.GetStatus(status);
+    assert(status.state==NearlinkIpShareState::IDLE);
+    sending=false;cpSender.join();
     s.Shutdown();
 }

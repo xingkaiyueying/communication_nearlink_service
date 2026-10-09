@@ -96,7 +96,8 @@ private:
     static int ReceiveDataCallback(const TRANS_Addr_S *addr, uint8_t *data, uint16_t len);
     static void SendDataStateCallback(const SLE_Addr_S *devAddr, uint8_t tcid, uint16_t portId, uint8_t result);
     static void ChannelStatusCallback(const QOSM_TransChannelRspParams_S *respParams);
-    static bool CheckChannelParamCallback(const SLE_Addr_S *addr, uint16_t srcPort);
+    static bool CheckChannelParamCallback(uint16_t srcPort);
+    static bool CheckIpSharePeerCallback(const SLE_Addr_S *addr, uint16_t srcPort);
 
     std::set<uint16_t> ports_;
     ffrt::mutex flagMutex_;

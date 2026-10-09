@@ -10,6 +10,7 @@
 #include <deque>
 #include "nearlink_ipshare_status.cpp"
 #include "iposl_codec.c"
+#include "parameters.h"
 #define private public
 #include "nearlink_ipshare_service.cpp"
 #include "nearlink_ipshare_channel.cpp"
@@ -17,6 +18,7 @@
 using namespace OHOS::Nearlink;
 static IposlProfileCallbacks profileCallbacks;
 static uint64_t profileGeneration;
+static uint32_t profileCapacity;
 static int starts, writes;
 static bool serverDrained=true;
 extern "C" int32_t IposlProfileInit(const IposlProfileCallbacks *c) { profileCallbacks=*c; return 0; }
@@ -25,7 +27,8 @@ extern "C" void IposlProfileStopClient() {}
 extern "C" void IposlProfileStopServer() {}
 extern "C" bool IposlProfileServerIsDrained() { return serverDrained; }
 extern "C" int32_t IposlProfileReleaseServerPeerChecked(const uint8_t *,uint8_t) { return 0; }
-extern "C" int32_t IposlProfileStartServerAny(uint8_t,uint32_t,uint64_t g) { profileGeneration=g; ++starts; return 0; }
+extern "C" int32_t IposlProfileStartServerAny(uint8_t,uint32_t capacity,uint64_t g)
+{ profileCapacity=capacity; profileGeneration=g; ++starts; return 0; }
 extern "C" void IposlProfileReleaseServerPeer(const uint8_t *,uint8_t) {}
 extern "C" int32_t IposlProfileStartServer(const uint8_t *,uint8_t,uint8_t,uint64_t g) { profileGeneration=g; ++starts; return 0; }
 extern "C" int32_t IposlProfileStartTerminal(const uint8_t *,uint8_t,const uint8_t *,uint8_t,uint64_t g)
@@ -121,8 +124,12 @@ int main()
     assert(status.state==NearlinkIpShareState::DISCOVERING); // queued old stop cannot kill new generation
     s.Stop(); DrainTasks(); s.Shutdown();
     assert(s.Initialize()==0);
+    for (int oldSetting : {0, 2, 7, 33}) {
+        OHOS::system::mockMaxTerminals=oldSetting;
+        assert(s.GetSupportedMaxTerminals()==32); // retired system parameter does not limit APP input
+    }
     OHOS::system::mockMaxTerminals=2;
-    assert(s.StartGatewayAny(1,0)!=0 && s.StartGatewayAny(1,3)!=0);
+    assert(s.StartGatewayAny(1,0)!=0 && s.StartGatewayAny(1,33)!=0);
     assert(s.StartGatewayAny(1,1)==0); DrainTasks();
     s.GetStatus(status); assert(status.role==NearlinkIpShareRole::GATEWAY &&
         status.state==NearlinkIpShareState::SERVING_NO_UPSTREAM && status.peerAddress.empty());
@@ -176,9 +183,10 @@ int main()
     aThread.join(); bThread.join();
     assert((aResult==0)!=(bResult==0)); // near-simultaneous claims have exactly one winner
     assert(s.Stop()==0); DrainTasks(); s.GetStatus(status); assert(status.state==NearlinkIpShareState::IDLE);
-    for (int capacity : {3, 5, 7}) {
-        OHOS::system::mockMaxTerminals=capacity;
+    for (int capacity : {3, 5, 7, 32}) {
         assert(s.StartGatewayAny(1,capacity)==0); DrainTasks(); s.GetStatus(status); gatewayGen=status.generation;
+        assert(profileCapacity==static_cast<uint32_t>(capacity) &&
+            s.gatewayPeers_.size()==static_cast<size_t>(capacity));
         for (uint8_t n=0;n<capacity;++n) {
             uint8_t next[6]={2,1,2,3,4,static_cast<uint8_t>(10+n)};
             assert(profileCallbacks.prepareMode(next,1,gatewayGen)==0);

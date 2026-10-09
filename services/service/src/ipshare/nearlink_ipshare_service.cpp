@@ -26,7 +26,6 @@
 #include "nearlink_ipshare_channel.h"
 #include "nearlink_utils.h"
 #include "raw_address.h"
-#include "parameters.h"
 
 namespace OHOS::Nearlink {
 namespace {
@@ -38,13 +37,13 @@ constexpr int32_t IP_SHARE_PROFILE_FAILED = -4;
 constexpr int32_t IP_SHARE_RESOURCE_FAILED = -5;
 constexpr auto SUPPORT_WAIT = std::chrono::seconds(30);
 constexpr int32_t IP_SHARE_MAX_CAPACITY_LIMIT = 32;
-constexpr const char *MAX_TERMINALS_PARAM = "persist.nearlink.ipshare.max_terminals";
 } // namespace
 
 int32_t NearlinkIpShareService::GetSupportedMaxTerminals() const
 {
-    int32_t configured = OHOS::system::GetIntParameter(MAX_TERMINALS_PARAM, 2);
-    return configured > 0 && configured <= IP_SHARE_MAX_CAPACITY_LIMIT ? configured : 0;
+    // Report the bounded API input range, not a measured radio concurrency.
+    // The APP supplies the actual admission limit through StartGatewayAny.
+    return IP_SHARE_MAX_CAPACITY_LIMIT;
 }
 
 NearlinkIpShareService::GatewayPeer *NearlinkIpShareService::FindGatewayPeerLocked(const uint8_t peer[6]) const

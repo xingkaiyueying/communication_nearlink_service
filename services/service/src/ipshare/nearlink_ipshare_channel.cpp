@@ -320,7 +320,6 @@ int32_t NearlinkIpShareChannel::CreateTun(const std::string &ifaceName)
     int32_t ret = tun_.Open([this](const uint8_t *data, uint16_t length) {
         if (Send(data, length) != 0) {
             ++rejected_;
-            HILOGW("[IpShare][Channel] drop outbound IP packet");
         }
     }, ifaceName);
     if (ret != 0) {
@@ -622,7 +621,6 @@ int NearlinkIpShareChannel::Receive(DTAP_Data_Info_S *info, SDF_Buff_S *buffer)
     }
     const uint8_t *data = SDF_DataOffset(buffer);
     uint32_t dataLen = SDF_DataLenGet(buffer);
-    bool bound = false;
     uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -632,7 +630,7 @@ int NearlinkIpShareChannel::Receive(DTAP_Data_Info_S *info, SDF_Buff_S *buffer)
                    info->lcid, info->tcid, dataLen);
             return -1;
         }
-        bound = DhcpBoundLocked();
+        (void)DhcpBoundLocked();
         generation = generation_;
     }
     uint16_t length = static_cast<uint16_t>(dataLen);
@@ -641,8 +639,6 @@ int NearlinkIpShareChannel::Receive(DTAP_Data_Info_S *info, SDF_Buff_S *buffer)
         return -1;
     }
     if (!AuthorizePacket(data, length, generation, true)) {
-        HILOGW("[IpShare][RX] packet rejected by IP policy pi=%{public}u length=%{public}u dhcpBound=%{public}d",
-               info->pi, length, bound);
         return -1;
     }
     /* Recheck under the ownership lock through delivery; stop cannot close/reopen underneath it. */
@@ -660,8 +656,6 @@ int NearlinkIpShareChannel::Receive(DTAP_Data_Info_S *info, SDF_Buff_S *buffer)
     } else {
         ++rx6_;
     }
-    HILOGD("[IpShare][RX] pi=%{public}u lcid=%{public}u tcid=%{public}u sdu=%{public}u", info->pi, info->lcid,
-           info->tcid, length);
     return 0;
 }
 
@@ -681,7 +675,6 @@ int32_t NearlinkIpShareChannel::Send(const uint8_t *data, uint16_t length)
     }
     uint16_t lcid = 0;
     uint8_t tcid = 0;
-    bool bound = false;
     uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -691,13 +684,10 @@ int32_t NearlinkIpShareChannel::Send(const uint8_t *data, uint16_t length)
         }
         lcid = lcid_;
         tcid = tcid_;
-        bound = DhcpBoundLocked();
+        (void)DhcpBoundLocked();
         generation = generation_;
     }
     if (!AuthorizePacket(data, length, generation, false)) {
-        uint8_t version = data != nullptr && length != 0 ? data[0] >> 4 : 0;
-        HILOGW("[IpShare][TX] packet rejected by IP policy version=%{public}u length=%{public}u dhcpBound=%{public}d",
-               version, length, bound);
         return -1;
     }
     uint8_t pi = data[0] >> 4 == 6 ? DTAP_PI_IPV6 : DTAP_PI_IPV4;
@@ -711,7 +701,6 @@ int32_t NearlinkIpShareChannel::Send(const uint8_t *data, uint16_t length)
     } else {
         ++tx6_;
     }
-    HILOGD("[IpShare][TX] pi=%{public}u lcid=%{public}u tcid=%{public}u sdu=%{public}u", pi, lcid, tcid, length);
     return 0;
 }
 
@@ -934,9 +923,6 @@ bool NearlinkIpShareChannel::AuthorizePacket(const uint8_t *data, uint16_t lengt
         if (verifyLocal && !next.LocalUsable(local, !gateway_, now) &&
             (!NearlinkIpShareTun::IsIpv6AddressUsable(data + 8, ifaceName_) ||
              !next.ObserveKernelLocal(local, !gateway_, now))) {
-            HILOGW("[IpShare][IPv6][PolicyReject] iface=%{public}s generation=%{public}llu "
-                   "direction=tx stage=LOCAL_ADDRESS length=%{public}u",
-                   ifaceName_.c_str(), static_cast<unsigned long long>(generation_), length);
             return false;
         }
         size_t oldRecords = ipv6_.Mappings().size();
@@ -946,23 +932,6 @@ bool NearlinkIpShareChannel::AuthorizePacket(const uint8_t *data, uint16_t lengt
                                             [](const auto &mapping) { return mapping.conflict; });
         bool allowed = next.Authorize(data, length, gateway_ == received, received ? peer_ : localLayer2_,
                                       static_cast<uint64_t>(seconds));
-        if (!allowed) {
-            auto state = [&next](const uint8_t *address, bool terminal) {
-                for (const auto &mapping : next.Mappings()) {
-                    if (mapping.terminal == terminal &&
-                        std::equal(mapping.address.begin(), mapping.address.end(), address)) {
-                        return 1 | (mapping.confirmed ? 2 : 0) | (mapping.conflict ? 4 : 0);
-                    }
-                }
-                return 0;
-            };
-            bool terminal = gateway_ == received;
-            HILOGW("[IpShare][IPv6][PolicyReject] iface=%{public}s generation=%{public}llu "
-                   "direction=%{public}s stage=WIRE_POLICY nextHeader=%{public}u length=%{public}u "
-                   "srcState=%{public}d dstState=%{public}d",
-                   ifaceName_.c_str(), static_cast<unsigned long long>(generation_), received ? "rx" : "tx",
-                   data[6], length, state(data + 8, terminal), state(data + 24, !terminal));
-        }
         if (allowed) {
             ipv6_ = std::move(next);
             size_t confirmed = std::count_if(ipv6_.Mappings().begin(), ipv6_.Mappings().end(),

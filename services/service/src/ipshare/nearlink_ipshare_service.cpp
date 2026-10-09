@@ -532,8 +532,6 @@ int32_t NearlinkIpShareService::GetStatus(NearlinkIpShareStatus &status) const
         return IP_SHARE_INVALID_STATE;
     }
     status = status_;
-    HILOGD("[IpShare][Service] status query role=%{public}d state=%{public}d error=%{public}d",
-           static_cast<int32_t>(status.role), static_cast<int32_t>(status.state), status.errorCode);
     return IP_SHARE_OK;
 }
 
@@ -1139,13 +1137,8 @@ int32_t NearlinkIpShareService::QueryNearlinkIpShareCapabilities(const std::stri
 void NearlinkIpShareService::NotifyStatus(const NearlinkIpShareStatus &status,
                                           const sptr<INearlinkIpShareObserver> &observer) const
 {
-    HILOGI("[IpShare][Status] generation=%{public}llu sequence=%{public}llu requestedMode=%{public}d selectedMode=%{public}d ready=%{public}d",
-        static_cast<unsigned long long>(status.generation), static_cast<unsigned long long>(status.sequence),
-        static_cast<int32_t>(status.requestedMode), static_cast<int32_t>(status.selectedMode), status.serviceReady);
     if (observer != nullptr) {
         observer->OnStatusChanged(status);
-    } else {
-        HILOGD("[IpShare][Service] status observer not registered");
     }
 }
 

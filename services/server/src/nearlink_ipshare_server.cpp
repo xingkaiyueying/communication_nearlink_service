@@ -68,8 +68,6 @@ int32_t NearlinkIpShareServer::GetStatus(NearlinkIpShareStatus &status)
     if (ret != 0) {
         HILOGE("[IpShare][Server] status failed ret=%{public}d", ret);
     } else {
-        HILOGD("[IpShare][Server] status ret=0 role=%{public}d state=%{public}d error=%{public}d",
-            static_cast<int32_t>(status.role), static_cast<int32_t>(status.state), status.errorCode);
     }
     return ret;
 }

@@ -154,8 +154,6 @@ int32_t NearlinkIpShareProxy::GetStatus(NearlinkIpShareStatus &status)
         return NL_ERR_IPC_TRANS_FAILED;
     }
     status = *result;
-    HILOGD("[IpShare][IPC] status completed role=%{public}d state=%{public}d error=%{public}d",
-        static_cast<int32_t>(status.role), static_cast<int32_t>(status.state), status.errorCode);
     return NL_NO_ERROR;
 }
 

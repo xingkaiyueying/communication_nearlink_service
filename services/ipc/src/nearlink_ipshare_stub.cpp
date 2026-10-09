@@ -156,9 +156,6 @@ int32_t NearlinkIpShareStub::GetStatusInner(NearlinkIpShareStub *stub, MessagePa
     }
     if (ret != 0) {
         HILOGE("[IpShare][IPC] status request handled with failure ret=%{public}d", ret);
-    } else {
-        HILOGD("[IpShare][IPC] status request handled role=%{public}d state=%{public}d error=%{public}d",
-            static_cast<int32_t>(status.role), static_cast<int32_t>(status.state), status.errorCode);
     }
     return NO_ERROR;
 }

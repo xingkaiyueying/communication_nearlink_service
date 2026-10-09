@@ -173,8 +173,7 @@
             ],
             "test": [
                 "//foundation/communication/nearlink_service/test:nearlink_unittest",
-                "//foundation/communication/nearlink_service/test:nearlink_fuzztest",
-                "//foundation/communication/nearlink_service/test/mytest:sleip_nearlink_stage1"
+                "//foundation/communication/nearlink_service/test:nearlink_fuzztest"
             ]
         }
     }

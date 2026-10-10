@@ -8,6 +8,7 @@
     "*InterfaceScanService*";
     "*InterfaceSleController*";
     "*InterfaceMeshService*";
+    "*NearlinkIpShareService*";
 
     # ============ SSAP 接口类 (精确类名 + 通配符) ============
     "*InterfaceProfileSsapClient*";

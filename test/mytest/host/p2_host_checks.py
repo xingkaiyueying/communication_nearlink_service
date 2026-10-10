@@ -24,6 +24,8 @@ with tempfile.TemporaryDirectory(prefix='p2-s1-') as tmp:
                    repo / 'services/stack/src/cp/bsl/sle/qosm/interface/qosm_trans_channel.h',
                    repo / 'ipc_parcel/parcel/nearlink_ipshare_status.h',
                    repo / 'ipc_parcel/parcel/nearlink_ipshare_status.cpp',
+                   repo / 'interfaces/def/nearlink_def.h',
+                   repo / 'interfaces/def/nearlink_def_types.h',
                    repo / 'ipc_parcel/interface/nearlink_service_ipc_interface_code.h']:
         shutil.copyfile(source, out / source.name)
     before_ref = os.environ.get('P3_RESTART_BEFORE_REF')

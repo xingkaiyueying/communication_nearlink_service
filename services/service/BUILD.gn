@@ -429,6 +429,7 @@ ohos_shared_library("nearlink_service_impl") {
   defines =  [
     "LOG_TAG = \"nearlink_service\"",
     "LOG_DOMAIN = 0xD000152",
+    "NEARLINK_EXPORT",
   ]
   defines += nearlink_service_defines
 

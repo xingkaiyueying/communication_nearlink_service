@@ -23,12 +23,13 @@
 #include <string>
 
 #include "i_nearlink_ipshare_observer.h"
+#include "nearlink_def.h"
 #include "nearlink_ipshare_status.h"
 
 namespace OHOS::Nearlink {
 class NearlinkIpShareChannel;
 
-class NearlinkIpShareService final {
+class NEARLINK_API NearlinkIpShareService final {
 public:
     static NearlinkIpShareService &GetInstance();
 
